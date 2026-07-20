@@ -54,6 +54,24 @@ Eigenständige WebApp für Anmeldung, automatische Liga-Zuteilung, Drag-and-drop
 
 9. Für die Subdomain ein Let's-Encrypt-Zertifikat aktivieren und HTTP dauerhaft auf HTTPS umleiten.
 
+## Anmeldungen aus Google Forms importieren
+
+Antworten aus Google Forms können über das verknüpfte Google Sheet als CSV-Datei exportiert und anschließend serverseitig importiert werden. Unterstützt werden die Spalten `Zeitstempel`, `Name`, `E-Mail-Adresse`, `GSH Mitgliedsnummer`, die ausführliche mit `Sleeper Name` beginnende Spalte und die Frage nach der Bereitschaft als Liga-Admin.
+
+Die CSV-Datei außerhalb des Dokumentenstamms auf den Server laden und zuerst einen Testlauf ausführen:
+
+```sh
+php bin/import-participants.php --season=latest --file=/vollstaendiger/pfad/anmeldungen.csv --dry-run
+```
+
+Der Testlauf prüft Pflichtfelder, Dubletten und jeden Sleeper-Namen über die Sleeper-API, speichert aber noch nichts. Wenn keine Fehler gemeldet werden, erfolgt der Import ohne `--dry-run`:
+
+```sh
+php bin/import-participants.php --season=latest --file=/vollstaendiger/pfad/anmeldungen.csv
+```
+
+Statt `latest` kann die konkrete Saison-ID angegeben werden. Bereits vorhandene Anmeldungen werden übersprungen. Zeilen mit Fehlern verhindern den gesamten Schreibvorgang, sodass kein unbemerkter Teilimport entsteht. Der Import ist nur möglich, solange die Saison noch offen oder geschlossen, aber noch nicht zugeteilt beziehungsweise freigegeben ist. Die CSV-Datei enthält personenbezogene Daten und sollte nach erfolgreichem Import sicher vom Server entfernt werden.
+
 ## Bedienung
 
 - Öffentliche Anmeldung: `https://fantasy.germanseahawkers.com/`
