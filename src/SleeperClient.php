@@ -62,10 +62,12 @@ final class SleeperClient
         }
 
         $decoded = json_decode((string) $body, true);
+        if ($decoded === null && trim((string) $body) === 'null') {
+            return [];
+        }
         if (!is_array($decoded)) {
             throw new RuntimeException('Sleeper hat eine ungültige Antwort geliefert.');
         }
         return $decoded;
     }
 }
-

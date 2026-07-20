@@ -114,7 +114,26 @@ function importedAt(string $value, string $fallback): string
         return $fallback;
     }
 
-    foreach (['d.m.Y H:i:s', 'd.m.Y H:i', 'd.m.Y, H:i:s', 'd.m.Y, H:i', 'Y-m-d H:i:s', 'm/d/Y H:i:s', 'm/d/Y H:i'] as $format) {
+    if (preg_match('/^(.*)\s+(OESZ|OEZ|MESZ|MEZ)$/u', $value, $matches)) {
+        $offsets = [
+            'OESZ' => '+03:00',
+            'OEZ' => '+02:00',
+            'MESZ' => '+02:00',
+            'MEZ' => '+01:00',
+        ];
+        $date = DateTimeImmutable::createFromFormat(
+            '!Y/m/d g:i:s A P',
+            $matches[1] . ' ' . $offsets[$matches[2]]
+        );
+        $errors = DateTimeImmutable::getLastErrors();
+        if ($date !== false && ($errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0))) {
+            return $date
+                ->setTimezone(new DateTimeZone(date_default_timezone_get()))
+                ->format('Y-m-d H:i:s');
+        }
+    }
+
+    foreach (['d.m.Y H:i:s', 'd.m.Y H:i', 'd.m.Y, H:i:s', 'd.m.Y, H:i', 'Y-m-d H:i:s', 'Y/m/d H:i:s', 'Y/m/d g:i:s A', 'm/d/Y H:i:s', 'm/d/Y H:i'] as $format) {
         $date = DateTimeImmutable::createFromFormat('!' . $format, $value);
         $errors = DateTimeImmutable::getLastErrors();
         if ($date !== false && ($errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0))) {
