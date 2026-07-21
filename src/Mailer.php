@@ -30,14 +30,44 @@ final class Mailer
             'German Sea Hawkers',
         ];
 
+        return $this->send((string) $participant['email'], $subject, implode("\r\n", $lines));
+    }
+
+    public function sendTest(string $recipient): array
+    {
+        return $this->send(
+            $recipient,
+            'Testmail · GSH Fantasy Manager',
+            "Moin,\r\n\r\nder SMTP-Versand des GSH Fantasy Managers funktioniert.\r\n\r\nGO HAWKS!\r\nGerman Sea Hawkers"
+        );
+    }
+
+    private function send(string $recipient, string $subject, string $body): array
+    {
+        $from = Config::get('MAIL_FROM');
+        $fromName = Config::get('MAIL_FROM_NAME', 'GSH Fantasy');
+        $transport = mb_strtolower(Config::get('MAIL_TRANSPORT', 'mail'));
+
+        if ($transport === 'smtp') {
+            try {
+                (new SmtpClient())->send($recipient, $subject, $body, $from, $fromName, $from);
+                return ['sent' => true, 'error' => null];
+            } catch (\Throwable $exception) {
+                return ['sent' => false, 'error' => $exception->getMessage()];
+            }
+        }
+        if ($transport !== 'mail') {
+            return ['sent' => false, 'error' => 'MAIL_TRANSPORT muss smtp oder mail sein.'];
+        }
+
         $headers = [
-            'From: ' . Config::get('MAIL_FROM_NAME', 'GSH Fantasy') . ' <' . Config::get('MAIL_FROM') . '>',
-            'Reply-To: ' . Config::get('MAIL_FROM'),
+            "From: {$fromName} <{$from}>",
+            "Reply-To: {$from}",
             'Content-Type: text/plain; charset=UTF-8',
             'X-Mailer: GSH Fantasy Manager',
         ];
 
-        $sent = mail((string) $participant['email'], '=?UTF-8?B?' . base64_encode($subject) . '?=', implode("\r\n", $lines), implode("\r\n", $headers));
+        $sent = mail($recipient, '=?UTF-8?B?' . base64_encode($subject) . '?=', $body, implode("\r\n", $headers));
         return ['sent' => $sent, 'error' => $sent ? null : 'PHP mail() hat die Nachricht nicht angenommen.'];
     }
 }

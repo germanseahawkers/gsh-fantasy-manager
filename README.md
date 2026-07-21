@@ -19,7 +19,7 @@ Eigenständige WebApp für Anmeldung, automatische Liga-Zuteilung, Drag-and-drop
 ## Voraussetzungen
 
 - PHP 8.1 oder neuer
-- PHP-Erweiterungen `pdo_mysql`, `curl` und `mbstring`
+- PHP-Erweiterungen `pdo_mysql`, `curl`, `mbstring` und `openssl`
 - MySQL oder MariaDB
 - eine funktionierende ausgehende Mail-Konfiguration des Plesk-Servers
 - HTTPS für `fantasy.germanseahawkers.com`
@@ -85,7 +85,23 @@ Nach Anmeldeschluss setzt der Cronjob die Saison auf geschlossen und erzeugt aut
 
 ## E-Mail-Zustellung
 
-Die App übergibt Nachrichten an die PHP-Mailfunktion des Plesk-Servers und protokolliert Annahme oder Fehler. Vor dem echten Sammelversand sollten SPF, DKIM und DMARC für die Absenderdomain eingerichtet und ein Test mit wenigen Adressen durchgeführt werden. Die Annahme durch `mail()` garantiert noch keine Zustellung beim Empfänger.
+Für den produktiven Versand nutzt die App Google Workspace SMTP Relay über eine in Google freigeschaltete feste Server-IP. Die `.env` wird dafür wie folgt konfiguriert:
+
+```dotenv
+MAIL_TRANSPORT=smtp
+MAIL_FROM=admin@germanseahawkers.com
+MAIL_FROM_NAME=German Sea Hawkers Fantasy Football
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_ENCRYPTION=tls
+SMTP_TIMEOUT=15
+SMTP_USERNAME=
+SMTP_PASSWORD=
+```
+
+Die leeren Zugangsdaten sind beabsichtigt: Google authentifiziert den Plesk-Server über seine zuvor in der Workspace-Admin-Konsole freigeschaltete öffentliche IP. TLS sowie die Prüfung des Google-Zertifikats sind verpflichtend. Vor dem Sammelversand muss im Administrationsbereich eine Testmail gesendet und deren SPF-, DKIM- und DMARC-Ergebnis im empfangenen Nachrichtenkopf kontrolliert werden. SMTP-Antworten und Fehler werden beim Sammelversand im Versandprotokoll gespeichert.
+
+`MAIL_TRANSPORT=mail` aktiviert bei Bedarf weiterhin die PHP-Mailfunktion des Plesk-Servers. Diese Einstellung sollte nur verwendet werden, wenn der lokale Mailserver einschließlich Envelope-Absender, SPF und DKIM vollständig konfiguriert ist.
 
 ## Sleeper-Grenzen
 

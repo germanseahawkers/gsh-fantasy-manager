@@ -151,6 +151,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("UPDATE participants SET league_id=?, mail_status='pending', mail_sent_at=NULL, updated_at=? WHERE id=?")->execute([$leagueId, date('Y-m-d H:i:s'), $participantId]);
             echo json_encode(['ok' => true]);
             exit;
+        } elseif ($action === 'test_mail') {
+            $recipient = mb_strtolower(trim((string) ($_POST['test_email'] ?? '')));
+            if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+                throw new RuntimeException('Bitte gib eine gültige Empfängeradresse für die Testmail ein.');
+            }
+            $result = (new Mailer())->sendTest($recipient);
+            if (!$result['sent']) {
+                throw new RuntimeException('Testmail fehlgeschlagen: ' . $result['error']);
+            }
+            Http::flash('success', "Testmail wurde an {$recipient} gesendet.");
         } elseif ($action === 'send_mails') {
             $seasonId = (int) $_POST['season_id'];
             $seasonStatement = $pdo->prepare('SELECT * FROM seasons WHERE id=?');
@@ -160,8 +170,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $queue->execute([$seasonId, 'sent']);
             $sent = 0;
             $failed = 0;
+            $mailer = new Mailer();
             foreach ($queue->fetchAll() as $participant) {
-                $result = (new Mailer())->sendAssignment($participant, ['name' => $participant['league_name'], 'invite_url' => $participant['invite_url']], $mailSeason);
+                $result = $mailer->sendAssignment($participant, ['name' => $participant['league_name'], 'invite_url' => $participant['invite_url']], $mailSeason);
                 $status = $result['sent'] ? 'sent' : 'failed';
                 $pdo->prepare('UPDATE participants SET mail_status=?, mail_sent_at=?, updated_at=? WHERE id=?')->execute([$status, $result['sent'] ? date('Y-m-d H:i:s') : null, date('Y-m-d H:i:s'), $participant['id']]);
                 $pdo->prepare('INSERT INTO mail_log (participant_id, recipient, subject, status, error_message, created_at) VALUES (?, ?, ?, ?, ?, ?)')->execute([$participant['id'], $participant['email'], $mailSeason['email_subject'], $status, $result['error'], date('Y-m-d H:i:s')]);
@@ -316,6 +327,7 @@ $statusLabels = ['open' => 'Anmeldung offen', 'closed' => 'Anmeldung geschlossen
     <section class="admin-section action-panel card">
         <div><p class="eyebrow">Schritt 4</p><h2>Freigeben und versenden</h2><p>Es werden nur noch nicht erfolgreich versendete Zuteilungsmails verschickt.</p></div>
         <div class="action-buttons">
+            <form method="post" class="test-mail-form"><?= Csrf::field() ?><input type="hidden" name="action" value="test_mail"><label class="field"><span>Testmail an</span><input type="email" name="test_email" placeholder="name@example.com" required></label><button class="button button--secondary" type="submit">Testmail senden</button></form>
             <form method="post"><?= Csrf::field() ?><input type="hidden" name="action" value="sync_sleeper"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--secondary" type="submit">Sleeper-Beitritte prüfen</button></form>
             <form method="post" data-confirm="Jetzt alle offenen Zuteilungsmails versenden?"><?= Csrf::field() ?><input type="hidden" name="action" value="send_mails"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--primary" type="submit">Freigeben & Mails versenden</button></form>
         </div>

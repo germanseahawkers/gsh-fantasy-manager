@@ -114,6 +114,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .unassigned { padding: 16px; margin-bottom: 16px; border-color: var(--gold); }
 .action-panel { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 26px; }
 .action-buttons { display: flex; gap: 12px; flex-wrap: wrap; }
+.test-mail-form { display: flex; align-items: flex-end; gap: 8px; }
+.test-mail-form .field { min-width: 240px; margin: 0; }
 .participant-table-card { overflow: hidden; }
 .table-scroll { overflow-x: auto; border-top: 1px solid var(--line); }
 table { width: 100%; border-collapse: collapse; }
@@ -126,6 +128,7 @@ th { color: var(--muted); background: #f7f9fb; font-size: .78rem; text-transform
   .settings-grid, .stats-grid { grid-template-columns: 1fr 1fr; }
   .field--wide { grid-column: 1 / -1; }
   .league-board { grid-template-columns: 1fr; }
+  .test-mail-form { width: 100%; align-items: stretch; flex-direction: column; }
 }
 @media (max-width: 480px) {
   .stats-grid, .settings-grid { grid-template-columns: 1fr; }
