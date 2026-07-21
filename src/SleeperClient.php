@@ -31,11 +31,11 @@ final class SleeperClient
             return [];
         }
 
-        $response = $this->get('/league/' . $leagueId . '/users');
+        $response = $this->get('/league/' . $leagueId . '/users', false);
         return array_is_list($response) ? $response : [];
     }
 
-    private function get(string $path): array
+    private function get(string $path, bool $notFoundAsEmpty = true): array
     {
         $curl = curl_init(self::BASE_URL . $path);
         curl_setopt_array($curl, [
@@ -55,7 +55,10 @@ final class SleeperClient
             throw new RuntimeException('Sleeper ist gerade nicht erreichbar. Bitte versuche es später erneut. ' . $error);
         }
         if ($status === 404) {
-            return [];
+            if ($notFoundAsEmpty) {
+                return [];
+            }
+            throw new RuntimeException('Die angegebene Sleeper-Liga wurde nicht gefunden.');
         }
         if ($status !== 200) {
             throw new RuntimeException('Sleeper konnte die Anfrage nicht verarbeiten.');

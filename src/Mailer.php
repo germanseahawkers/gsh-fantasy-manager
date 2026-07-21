@@ -33,6 +33,32 @@ final class Mailer
         return $this->send((string) $participant['email'], $subject, implode("\r\n", $lines));
     }
 
+    public function sendReminder(array $participant, array $league, array $season): array
+    {
+        $subject = 'Erinnerung: ' . (string) $season['email_subject'];
+        $draft = empty($season['draft_at']) ? 'wird noch bekannt gegeben' : date('d.m.Y \u\m H:i \U\h\r', strtotime($season['draft_at']));
+        $inviteUrl = (string) ($league['invite_url'] ?? '');
+
+        $lines = [
+            'Moin ' . $participant['name'] . ',',
+            '',
+            'laut unserem aktuellen Sleeper-Abgleich bist du deiner zugeteilten Liga noch nicht beigetreten.',
+            '',
+            'Liga: ' . $league['name'],
+            'Draft: ' . $draft,
+            'Sleeper-Account: ' . $participant['sleeper_username'],
+            '',
+            $inviteUrl !== '' ? 'Liga beitreten: ' . $inviteUrl : 'Den Einladungslink erhältst du separat.',
+            '',
+            'Bitte tritt deiner Liga möglichst bald bei. Falls du inzwischen beigetreten bist, kannst du diese Erinnerung ignorieren.',
+            '',
+            'GO HAWKS!',
+            'German Sea Hawkers',
+        ];
+
+        return $this->send((string) $participant['email'], $subject, implode("\r\n", $lines));
+    }
+
     public function sendTest(string $recipient): array
     {
         return $this->send(

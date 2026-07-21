@@ -12,7 +12,10 @@ require dirname(__DIR__) . '/src/bootstrap.php';
 $pdo = Database::connection();
 $season = $pdo->query("SELECT * FROM seasons ORDER BY registration_closes_at DESC LIMIT 1")->fetch() ?: null;
 $errors = [];
-$success = false;
+$nowTimestamp = time();
+$registrationHasStarted = $season && $nowTimestamp >= strtotime($season['registration_opens_at']);
+$deadlinePassed = $season && $nowTimestamp > strtotime($season['registration_closes_at']);
+$acceptsRegistration = $season && $registrationHasStarted;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::verify();
@@ -27,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $sleeperUsername = trim((string) ($_POST['sleeper_username'] ?? ''));
     $adminVolunteer = ($_POST['admin_volunteer'] ?? '') === '1' ? 1 : 0;
 
-    if (!$season || $season['status'] !== 'open' || time() < strtotime($season['registration_opens_at']) || time() > strtotime($season['registration_closes_at'])) {
+    if (!$acceptsRegistration) {
         $errors[] = 'Das Anmeldefenster ist derzeit geschlossen.';
     }
     if (mb_strlen($name) < 2 || mb_strlen($name) > 160) {
@@ -67,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sleeperUser['display_name'] ?? null,
                 $adminVolunteer, $now, $now,
             ]);
-            Http::redirect('/?registered=1');
+            Http::redirect('/?registered=' . ($deadlinePassed ? 'late' : '1'));
         } catch (PDOException $exception) {
             if (str_contains($exception->getMessage(), 'UNIQUE') || str_contains($exception->getMessage(), 'Duplicate entry')) {
                 $errors[] = 'Diese E-Mail-Adresse oder dieser Sleeper-Account ist bereits angemeldet.';
@@ -78,11 +81,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$success = ($_GET['registered'] ?? '') === '1';
-$isOpen = $season
-    && $season['status'] === 'open'
-    && time() >= strtotime($season['registration_opens_at'])
-    && time() <= strtotime($season['registration_closes_at']);
+$registrationResult = (string) ($_GET['registered'] ?? '');
+$success = in_array($registrationResult, ['1', 'late'], true);
+$lateSuccess = $registrationResult === 'late';
 ?>
 <!doctype html>
 <html lang="de">
@@ -105,19 +106,29 @@ $isOpen = $season
     <?php if ($success): ?>
         <section class="card success-card">
             <span class="status-icon">✓</span>
-            <h2>Du bist dabei!</h2>
-            <p>Deine Anmeldung wurde gespeichert. Nach der Liga-Zuteilung erhältst du alle weiteren Informationen per E-Mail.</p>
+            <h2><?= $lateSuccess ? 'Nachrückanmeldung gespeichert' : 'Du bist dabei!' ?></h2>
+            <p><?= $lateSuccess
+                ? 'Wir prüfen, ob noch ein Ligaplatz frei wird. Deine Anmeldung ist noch keine feste Zusage; sobald wir dich unterbringen können, erhältst du alle weiteren Informationen per E-Mail.'
+                : 'Deine Anmeldung wurde gespeichert. Nach der Liga-Zuteilung erhältst du alle weiteren Informationen per E-Mail.' ?></p>
             <p><strong>GO HAWKS!</strong></p>
         </section>
-    <?php elseif (!$isOpen): ?>
+    <?php elseif (!$acceptsRegistration): ?>
         <section class="card closed-card">
             <h2>Die Anmeldung ist geschlossen</h2>
-            <p><?= $season ? 'Das Anmeldefenster endete am ' . Http::e(date('d.m.Y \u\m H:i \U\h\r', strtotime($season['registration_closes_at']))) . '.' : 'Aktuell ist keine Fantasy-Saison zur Anmeldung freigeschaltet.' ?></p>
+            <p><?= $season
+                ? 'Die Anmeldung beginnt am ' . Http::e(date('d.m.Y \u\m H:i \U\h\r', strtotime($season['registration_opens_at']))) . '.'
+                : 'Aktuell ist keine Fantasy-Saison zur Anmeldung freigeschaltet.' ?></p>
         </section>
     <?php else: ?>
+        <?php if ($deadlinePassed): ?>
+            <div class="alert alert--warning" role="status">
+                <strong>Die reguläre Anmeldefrist ist bereits vorbei.</strong><br>
+                Du kannst dich weiterhin für das Nachrückverfahren anmelden. Ein Ligaplatz kann nicht garantiert werden; wir melden uns, sobald ein Platz frei ist.
+            </div>
+        <?php endif; ?>
         <section class="card intro-card">
-            <h2>Anmeldung</h2>
-            <p>Melde dich bis <strong><?= Http::e(date('d.m.Y, H:i \U\h\r', strtotime($season['registration_closes_at']))) ?></strong> für unsere gemeinsamen GSH Fantasy Football Ligen an.</p>
+            <h2><?= $deadlinePassed ? 'Nachrückverfahren' : 'Anmeldung' ?></h2>
+            <?php if (!$deadlinePassed): ?><p>Melde dich bis <strong><?= Http::e(date('d.m.Y, H:i \U\h\r', strtotime($season['registration_closes_at']))) ?></strong> für unsere gemeinsamen GSH Fantasy Football Ligen an.</p><?php endif; ?>
             <?php if (!empty($season['draft_at'])): ?>
                 <p>Der Draft findet am <strong><?= Http::e(date('d.m.Y \u\m H:i \U\h\r', strtotime($season['draft_at']))) ?></strong> statt.</p>
             <?php endif; ?>
@@ -166,7 +177,7 @@ $isOpen = $season
                 <span>Ich stimme der Verarbeitung meiner Angaben für die Organisation der GSH Fantasy-Ligen zu. <b>*</b></span>
             </label>
 
-            <button class="button button--primary button--large" type="submit">Verbindlich anmelden</button>
+            <button class="button button--primary button--large" type="submit"><?= $deadlinePassed ? 'Für das Nachrückverfahren anmelden' : 'Verbindlich anmelden' ?></button>
         </form>
     <?php endif; ?>
 </main>

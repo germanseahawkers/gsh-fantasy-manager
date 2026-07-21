@@ -180,6 +180,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $pdo->prepare("UPDATE seasons SET status='approved', updated_at=? WHERE id=?")->execute([date('Y-m-d H:i:s'), $seasonId]);
             Http::flash($failed ? 'error' : 'success', "Versand abgeschlossen: {$sent} gesendet, {$failed} fehlgeschlagen.");
+        } elseif ($action === 'send_reminders') {
+            $seasonId = (int) $_POST['season_id'];
+            $seasonStatement = $pdo->prepare('SELECT * FROM seasons WHERE id=?');
+            $seasonStatement->execute([$seasonId]);
+            $mailSeason = $seasonStatement->fetch();
+            if (!$mailSeason) {
+                throw new RuntimeException('Die Saison wurde nicht gefunden.');
+            }
+
+            $leagueStatement = $pdo->prepare("SELECT DISTINCT l.* FROM leagues l JOIN participants p ON p.league_id=l.id WHERE l.season_id=? AND p.mail_status='sent' AND p.joined_sleeper_at IS NULL ORDER BY l.id");
+            $leagueStatement->execute([$seasonId]);
+            $leaguesToCheck = $leagueStatement->fetchAll();
+            $sleeper = new SleeperClient();
+            foreach ($leaguesToCheck as $league) {
+                $leagueId = trim((string) ($league['sleeper_league_id'] ?? ''));
+                if (!preg_match('/^[0-9]+$/', $leagueId)) {
+                    throw new RuntimeException('Für die Liga „' . $league['name'] . '“ fehlt eine gültige Sleeper League-ID. Es wurden keine Erinnerungen versendet.');
+                }
+                $userIds = array_values(array_filter(array_column($sleeper->leagueUsers($leagueId), 'user_id')));
+                if ($userIds === []) {
+                    continue;
+                }
+                $placeholders = implode(',', array_fill(0, count($userIds), '?'));
+                $now = date('Y-m-d H:i:s');
+                $update = $pdo->prepare("UPDATE participants SET joined_sleeper_at=?, updated_at=? WHERE league_id=? AND sleeper_user_id IN ({$placeholders})");
+                $update->execute([$now, $now, $league['id'], ...$userIds]);
+            }
+
+            $queue = $pdo->prepare("SELECT p.*, l.name AS league_name, l.invite_url FROM participants p JOIN leagues l ON l.id=p.league_id WHERE p.season_id=? AND p.mail_status='sent' AND p.joined_sleeper_at IS NULL ORDER BY p.id");
+            $queue->execute([$seasonId]);
+            $recipients = $queue->fetchAll();
+            if ($recipients === []) {
+                Http::flash('success', 'Alle eingeladenen Teilnehmer sind bereits beigetreten. Es wurden keine Erinnerungen versendet.');
+            } else {
+                $sent = 0;
+                $failed = 0;
+                $subject = 'Erinnerung: ' . $mailSeason['email_subject'];
+                $mailer = new Mailer();
+                foreach ($recipients as $participant) {
+                    $result = $mailer->sendReminder($participant, ['name' => $participant['league_name'], 'invite_url' => $participant['invite_url']], $mailSeason);
+                    $status = $result['sent'] ? 'sent' : 'failed';
+                    $pdo->prepare('INSERT INTO mail_log (participant_id, recipient, subject, status, error_message, created_at) VALUES (?, ?, ?, ?, ?, ?)')->execute([$participant['id'], $participant['email'], $subject, $status, $result['error'], date('Y-m-d H:i:s')]);
+                    $result['sent'] ? $sent++ : $failed++;
+                }
+                Http::flash($failed ? 'error' : 'success', "Reminder-Versand abgeschlossen: {$sent} gesendet, {$failed} fehlgeschlagen.");
+            }
         } elseif ($action === 'sync_sleeper') {
             $seasonId = (int) $_POST['season_id'];
             $statement = $pdo->prepare('SELECT * FROM leagues WHERE season_id=? AND sleeper_league_id IS NOT NULL');
@@ -229,8 +275,9 @@ foreach ($participants as $participant) {
     $participantsByLeague[(int) ($participant['league_id'] ?? 0)][] = $participant;
 }
 $adminParticipantIds = array_filter(array_column($leagues, 'admin_participant_id'));
+$reminderCandidateCount = count(array_filter($participants, fn($participant) => $participant['mail_status'] === 'sent' && empty($participant['joined_sleeper_at'])));
 $flash = Http::pullFlash();
-$statusLabels = ['open' => 'Anmeldung offen', 'closed' => 'Anmeldung geschlossen', 'assignment_draft' => 'Zuteilung in Bearbeitung', 'approved' => 'Freigegeben'];
+$statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre Frist beendet', 'assignment_draft' => 'Zuteilung in Bearbeitung', 'approved' => 'Freigegeben'];
 ?>
 <!doctype html>
 <html lang="de">
@@ -306,16 +353,28 @@ $statusLabels = ['open' => 'Anmeldung offen', 'closed' => 'Anmeldung geschlossen
     <section class="admin-section">
         <div class="section-heading"><div><p class="eyebrow">Schritt 3</p><h2>Teilnehmer verteilen</h2><p>Die automatische Verteilung füllt alle Ligen gleichmäßig. Danach kannst du Karten per Drag-and-drop verschieben.</p></div><form method="post"><?= Csrf::field() ?><input type="hidden" name="action" value="allocate"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--primary" type="submit">Automatisch verteilen</button></form></div>
 
-        <?php if (!empty($participantsByLeague[0])): ?><div class="unassigned card"><h3>Noch nicht zugeteilt</h3><p><?= count($participantsByLeague[0]) ?> Teilnehmer</p></div><?php endif; ?>
+        <?php if (!empty($participantsByLeague[0])): ?>
+        <div class="unassigned card" data-league-id="0">
+            <div><h3>Nachrücker / noch nicht zugeteilt</h3><p>Ziehe eine Person auf eine Liga mit freiem Platz.</p></div>
+            <div class="unassigned-list">
+                <?php foreach ($participantsByLeague[0] as $participant): $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); ?>
+                <article class="participant-card" draggable="true" data-participant-id="<?= (int) $participant['id'] ?>">
+                    <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span></div>
+                    <div class="card-tags"><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($participant['mail_status']) ?>" title="Mail: <?= Http::e($participant['mail_status']) ?>"></span></div>
+                </article>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php endif; ?>
         <div class="league-board">
             <?php foreach ($leagues as $league): $leagueParticipants = $participantsByLeague[(int) $league['id']] ?? []; ?>
             <div class="league-column" data-league-id="<?= (int) $league['id'] ?>">
                 <header><div><h3><?= Http::e($league['name']) ?></h3><span><?= count($leagueParticipants) ?> / <?= (int) $league['capacity'] ?></span></div></header>
                 <div class="participant-list" data-dropzone>
-                    <?php foreach ($leagueParticipants as $participant): $isAdmin = (int) $league['admin_participant_id'] === (int) $participant['id']; ?>
+                    <?php foreach ($leagueParticipants as $participant): $isAdmin = (int) $league['admin_participant_id'] === (int) $participant['id']; $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); ?>
                     <article class="participant-card <?= $isAdmin ? 'participant-card--admin' : '' ?>" draggable="<?= $isAdmin ? 'false' : 'true' ?>" data-participant-id="<?= (int) $participant['id'] ?>">
                         <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span></div>
-                        <div class="card-tags"><?php if ($isAdmin): ?><span class="tag tag--admin">Liga-Admin</span><?php endif; ?><?php if ($participant['joined_sleeper_at']): ?><span class="tag tag--joined">Beigetreten</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($participant['mail_status']) ?>" title="Mail: <?= Http::e($participant['mail_status']) ?>"></span></div>
+                        <div class="card-tags"><?php if ($isAdmin): ?><span class="tag tag--admin">Liga-Admin</span><?php endif; ?><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><?php if ($participant['joined_sleeper_at']): ?><span class="tag tag--joined">Beigetreten</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($participant['mail_status']) ?>" title="Mail: <?= Http::e($participant['mail_status']) ?>"></span></div>
                     </article>
                     <?php endforeach; ?>
                 </div>
@@ -325,10 +384,11 @@ $statusLabels = ['open' => 'Anmeldung offen', 'closed' => 'Anmeldung geschlossen
     </section>
 
     <section class="admin-section action-panel card">
-        <div><p class="eyebrow">Schritt 4</p><h2>Freigeben und versenden</h2><p>Es werden nur noch nicht erfolgreich versendete Zuteilungsmails verschickt.</p></div>
+        <div><p class="eyebrow">Schritt 4</p><h2>Freigeben und versenden</h2><p>Zuteilungsmails gehen nur an offene Empfänger. Vor Erinnerungen wird der Sleeper-Beitritt automatisch erneut geprüft.</p></div>
         <div class="action-buttons">
             <form method="post" class="test-mail-form"><?= Csrf::field() ?><input type="hidden" name="action" value="test_mail"><label class="field"><span>Testmail an</span><input type="email" name="test_email" placeholder="name@example.com" required></label><button class="button button--secondary" type="submit">Testmail senden</button></form>
             <form method="post"><?= Csrf::field() ?><input type="hidden" name="action" value="sync_sleeper"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--secondary" type="submit">Sleeper-Beitritte prüfen</button></form>
+            <form method="post" data-confirm="Sleeper-Beitritte jetzt prüfen und danach nur noch nicht beigetretene Teilnehmer erinnern?"><?= Csrf::field() ?><input type="hidden" name="action" value="send_reminders"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--secondary" type="submit">Nicht Beigetretene erinnern (<?= $reminderCandidateCount ?>)</button></form>
             <form method="post" data-confirm="Jetzt alle offenen Zuteilungsmails versenden?"><?= Csrf::field() ?><input type="hidden" name="action" value="send_mails"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--primary" type="submit">Freigeben & Mails versenden</button></form>
         </div>
     </section>
