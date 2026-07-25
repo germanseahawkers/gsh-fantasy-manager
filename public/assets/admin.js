@@ -44,7 +44,6 @@
         const response = await fetch('/admin.php', { method: 'POST', body, credentials: 'same-origin' });
         const result = await response.json();
         if (!response.ok || !result.ok) throw new Error(result.message || 'Verschieben fehlgeschlagen.');
-        zone.appendChild(dragged);
         window.location.reload();
       } catch (error) {
         window.alert(error.message);
@@ -52,4 +51,3 @@
     });
   });
 })();
-
