@@ -22,7 +22,7 @@ $closed = $pdo->query("SELECT * FROM seasons WHERE status='closed'")->fetchAll()
 foreach ($closed as $season) {
     $leaguesStatement = $pdo->prepare('SELECT id, capacity, admin_participant_id FROM leagues WHERE season_id=? ORDER BY sort_order, id');
     $leaguesStatement->execute([$season['id']]);
-    $participantsStatement = $pdo->prepare('SELECT id FROM participants WHERE season_id=?');
+    $participantsStatement = $pdo->prepare('SELECT id, league_id FROM participants WHERE season_id=?');
     $participantsStatement->execute([$season['id']]);
     $leagues = $leaguesStatement->fetchAll();
     $participants = $participantsStatement->fetchAll();
@@ -33,7 +33,7 @@ foreach ($closed as $season) {
     try {
         $assignments = (new Allocator())->allocate($leagues, $participants);
         $pdo->beginTransaction();
-        $update = $pdo->prepare("UPDATE participants SET league_id=?, mail_status='pending', mail_sent_at=NULL, updated_at=? WHERE id=?");
+        $update = $pdo->prepare("UPDATE participants SET league_id=?, mail_status=CASE WHEN mail_sent_at IS NULL THEN 'pending' ELSE mail_status END, updated_at=? WHERE id=?");
         foreach ($assignments as $participantId => $leagueId) {
             $update->execute([$leagueId, $now, $participantId]);
         }
@@ -66,4 +66,3 @@ foreach ($approved as $season) {
         }
     }
 }
-

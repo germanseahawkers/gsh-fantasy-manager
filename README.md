@@ -79,7 +79,7 @@ Statt `latest` kann die konkrete Saison-ID angegeben werden. Bereits vorhandene 
 
 Zuerst wird eine Saison angelegt, danach die gewünschte Anzahl an Ligen. Jede Liga erhält Kapazität, Sleeper League-ID und den in Sleeper kopierten Einladungslink.
 
-Teilnehmer, die im Formular ihre Admin-Bereitschaft erklären, werden im Backend hervorgehoben. Für jede Liga wird anschließend genau ein tatsächlicher Liga-Admin ausgewählt. Derselbe Teilnehmer kann technisch nicht Admin zweier Ligen sein und bleibt bei der automatischen Verteilung in seiner Liga.
+Teilnehmer, die im Formular ihre Admin-Bereitschaft erklären, werden im Backend hervorgehoben. Für jede Liga wird anschließend genau ein tatsächlicher Liga-Admin ausgewählt. Derselbe Teilnehmer kann technisch nicht Admin zweier Ligen sein und bleibt bei der automatischen Verteilung in seiner Liga. Vor der ersten Randomisierung können außerdem beliebige Spieler per Drag-and-drop fest einer Liga zugeordnet werden; die automatische Verteilung behält diese Zuordnungen bei und verteilt nur die noch offenen Teilnehmer.
 
 Nach dem regulären Anmeldeschluss setzt der Cronjob den internen Saisonstatus auf geschlossen und erzeugt automatisch einen gleichmäßigen Zuteilungsentwurf. Das öffentliche Formular bleibt anschließend als Nachrückverfahren erreichbar. Nach bereits erfolgter Zuteilung eingehende Anmeldungen erhalten keine automatische Platzzusage und erscheinen zunächst als nicht zugeteilt, damit sie gezielt auf freie Plätze oder als Ersatz verschoben werden können. Erst der Button **Freigeben & Mails versenden** verschickt die Einladungen. So bleibt Zeit für Drag-and-drop-Korrekturen.
 
@@ -102,6 +102,8 @@ SMTP_PASSWORD=
 Die leeren Zugangsdaten sind beabsichtigt: Google authentifiziert den Plesk-Server über seine zuvor in der Workspace-Admin-Konsole freigeschaltete öffentliche IP. TLS sowie die Prüfung des Google-Zertifikats sind verpflichtend. Vor dem Sammelversand muss im Administrationsbereich eine Testmail gesendet und deren SPF-, DKIM- und DMARC-Ergebnis im empfangenen Nachrichtenkopf kontrolliert werden. SMTP-Antworten und Fehler werden beim Sammelversand im Versandprotokoll gespeichert.
 
 In Schritt 4 kann außerdem ein Reminder-Versand angestoßen werden. Die App gleicht dafür zuerst alle betroffenen Ligen live mit Sleeper ab und sendet anschließend ausschließlich an Teilnehmer, deren ursprüngliche Zuteilungsmail erfolgreich versendet wurde und für die weiterhin kein Beitritt erkannt wurde. Schlägt der Sleeper-Abgleich fehl oder fehlt eine League-ID, werden keine Erinnerungen versendet.
+
+Eine erfolgreich versendete Zuteilungsmail wird zusammen mit der Liga gespeichert, für die der Link verschickt wurde. Der Sammelversand berücksichtigt dadurch nur neu zugeteilte Nachrücker ohne Einladung sowie Teilnehmer, deren Liga seit der letzten Einladung geändert wurde. Nach der ersten vollständigen Verteilung ändert der Verteilungsbutton seine Funktion und verteilt ausschließlich noch unzugeteilte Nachrücker auf freie Plätze; bestehende Zuordnungen bleiben erhalten. Bei der manuellen Verschiebung bereits eingeladener Teilnehmer weist die Oberfläche darauf hin, dass beim nächsten Zuteilungsversand eine neue Mail für die neue Liga verschickt wird.
 
 `MAIL_TRANSPORT=mail` aktiviert bei Bedarf weiterhin die PHP-Mailfunktion des Plesk-Servers. Diese Einstellung sollte nur verwendet werden, wenn der lokale Mailserver einschließlich Envelope-Absender, SPF und DKIM vollständig konfiguriert ist.
 

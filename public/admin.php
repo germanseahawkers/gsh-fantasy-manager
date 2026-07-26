@@ -119,23 +119,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             Http::flash('success', 'Liga-Admin aktualisiert. Jeder Admin ist höchstens einer Liga zugeordnet.');
         } elseif ($action === 'allocate') {
             $seasonId = (int) $_POST['season_id'];
-            $leagueStatement = $pdo->prepare('SELECT id, capacity, admin_participant_id FROM leagues WHERE season_id=? ORDER BY sort_order, id');
-            $leagueStatement->execute([$seasonId]);
-            $participantStatement = $pdo->prepare('SELECT id FROM participants WHERE season_id=?');
-            $participantStatement->execute([$seasonId]);
-            $assignments = (new Allocator())->allocate($leagueStatement->fetchAll(), $participantStatement->fetchAll());
-            $pdo->beginTransaction();
-            $update = $pdo->prepare('UPDATE participants SET league_id=?, mail_status=?, mail_sent_at=NULL, updated_at=? WHERE id=?');
-            foreach ($assignments as $participantId => $leagueId) {
-                $update->execute([$leagueId, 'pending', date('Y-m-d H:i:s'), $participantId]);
+            $seasonCheck = $pdo->prepare('SELECT status FROM seasons WHERE id=?');
+            $seasonCheck->execute([$seasonId]);
+            $seasonStatus = $seasonCheck->fetchColumn();
+            if ($seasonStatus === false) {
+                throw new RuntimeException('Die Saison wurde nicht gefunden.');
             }
-            $pdo->prepare("UPDATE seasons SET status='assignment_draft', updated_at=? WHERE id=?")->execute([date('Y-m-d H:i:s'), $seasonId]);
-            $pdo->commit();
-            Http::flash('success', count($assignments) . ' Teilnehmer wurden gleichmäßig verteilt.');
+            $isWaitlistAllocation = in_array($seasonStatus, ['assignment_draft', 'approved'], true);
+            if ($isWaitlistAllocation) {
+                $leagueStatement = $pdo->prepare('SELECT l.id, l.capacity, COUNT(p.id) AS current_count FROM leagues l LEFT JOIN participants p ON p.league_id=l.id WHERE l.season_id=? GROUP BY l.id, l.capacity, l.sort_order ORDER BY l.sort_order, l.id');
+                $leagueStatement->execute([$seasonId]);
+                $participantStatement = $pdo->prepare('SELECT id FROM participants WHERE season_id=? AND league_id IS NULL ORDER BY id');
+                $participantStatement->execute([$seasonId]);
+                $assignments = (new Allocator())->allocateUnassigned($leagueStatement->fetchAll(), $participantStatement->fetchAll());
+            } else {
+                $leagueStatement = $pdo->prepare('SELECT id, capacity, admin_participant_id FROM leagues WHERE season_id=? ORDER BY sort_order, id');
+                $leagueStatement->execute([$seasonId]);
+                $participantStatement = $pdo->prepare('SELECT id, league_id FROM participants WHERE season_id=?');
+                $participantStatement->execute([$seasonId]);
+                $assignments = (new Allocator())->allocate($leagueStatement->fetchAll(), $participantStatement->fetchAll());
+            }
+            if ($assignments === []) {
+                Http::flash('success', 'Es sind aktuell keine unzugeteilten Nachrücker vorhanden.');
+            } else {
+                $pdo->beginTransaction();
+                $update = $pdo->prepare('UPDATE participants SET league_id=?, mail_status=?, updated_at=? WHERE id=?');
+                foreach ($assignments as $participantId => $leagueId) {
+                    $update->execute([$leagueId, 'pending', date('Y-m-d H:i:s'), $participantId]);
+                }
+                if (!$isWaitlistAllocation) {
+                    $pdo->prepare("UPDATE seasons SET status='assignment_draft', updated_at=? WHERE id=?")->execute([date('Y-m-d H:i:s'), $seasonId]);
+                }
+                $pdo->commit();
+                Http::flash('success', $isWaitlistAllocation
+                    ? count($assignments) . ' Nachrücker wurden auf freie Ligaplätze verteilt.'
+                    : count($assignments) . ' Teilnehmer wurden gleichmäßig verteilt.');
+            }
         } elseif ($action === 'move_participant') {
             header('Content-Type: application/json; charset=UTF-8');
             $participantId = (int) $_POST['participant_id'];
             $leagueId = (int) $_POST['league_id'];
+            $invitationCheck = $pdo->prepare('SELECT CASE WHEN invitation_league_id IS NOT NULL THEN 1 ELSE 0 END FROM participants WHERE id=?');
+            $invitationCheck->execute([$participantId]);
+            $invitationSent = $invitationCheck->fetchColumn();
+            if ($invitationSent === false) {
+                throw new RuntimeException('Der Teilnehmer wurde nicht gefunden.');
+            }
             $adminCheck = $pdo->prepare('SELECT id FROM leagues WHERE admin_participant_id=?');
             $adminCheck->execute([$participantId]);
             $adminLeague = $adminCheck->fetchColumn();
@@ -148,7 +177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$capacity || (int) $capacity['current_count'] >= (int) $capacity['capacity']) {
                 throw new RuntimeException('Diese Liga ist bereits voll.');
             }
-            $pdo->prepare("UPDATE participants SET league_id=?, mail_status='pending', mail_sent_at=NULL, updated_at=? WHERE id=?")->execute([$leagueId, date('Y-m-d H:i:s'), $participantId]);
+            $pdo->prepare("UPDATE participants SET league_id=?, joined_sleeper_at=NULL, mail_status='pending', updated_at=? WHERE id=?")->execute([$leagueId, date('Y-m-d H:i:s'), $participantId]);
             echo json_encode(['ok' => true]);
             exit;
         } elseif ($action === 'test_mail') {
@@ -166,15 +195,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $seasonStatement = $pdo->prepare('SELECT * FROM seasons WHERE id=?');
             $seasonStatement->execute([$seasonId]);
             $mailSeason = $seasonStatement->fetch();
-            $queue = $pdo->prepare('SELECT p.*, l.name AS league_name, l.invite_url FROM participants p JOIN leagues l ON l.id=p.league_id WHERE p.season_id=? AND p.mail_status<>? ORDER BY p.id');
-            $queue->execute([$seasonId, 'sent']);
+            $queue = $pdo->prepare('SELECT p.*, l.name AS league_name, l.invite_url FROM participants p JOIN leagues l ON l.id=p.league_id WHERE p.season_id=? AND (p.invitation_league_id IS NULL OR p.invitation_league_id<>p.league_id) ORDER BY p.id');
+            $queue->execute([$seasonId]);
             $sent = 0;
             $failed = 0;
             $mailer = new Mailer();
             foreach ($queue->fetchAll() as $participant) {
+                $claim = $pdo->prepare("UPDATE participants SET mail_status='sending', updated_at=? WHERE id=? AND mail_status<>'sending' AND (invitation_league_id IS NULL OR invitation_league_id<>league_id)");
+                $claim->execute([date('Y-m-d H:i:s'), $participant['id']]);
+                if ($claim->rowCount() !== 1) {
+                    continue;
+                }
                 $result = $mailer->sendAssignment($participant, ['name' => $participant['league_name'], 'invite_url' => $participant['invite_url']], $mailSeason);
                 $status = $result['sent'] ? 'sent' : 'failed';
-                $pdo->prepare('UPDATE participants SET mail_status=?, mail_sent_at=?, updated_at=? WHERE id=?')->execute([$status, $result['sent'] ? date('Y-m-d H:i:s') : null, date('Y-m-d H:i:s'), $participant['id']]);
+                $sentAt = $result['sent'] ? date('Y-m-d H:i:s') : $participant['mail_sent_at'];
+                $invitationLeagueId = $result['sent'] ? $participant['league_id'] : $participant['invitation_league_id'];
+                $pdo->prepare('UPDATE participants SET mail_status=?, mail_sent_at=?, invitation_league_id=?, updated_at=? WHERE id=?')->execute([$status, $sentAt, $invitationLeagueId, date('Y-m-d H:i:s'), $participant['id']]);
                 $pdo->prepare('INSERT INTO mail_log (participant_id, recipient, subject, status, error_message, created_at) VALUES (?, ?, ?, ?, ?, ?)')->execute([$participant['id'], $participant['email'], $mailSeason['email_subject'], $status, $result['error'], date('Y-m-d H:i:s')]);
                 $result['sent'] ? $sent++ : $failed++;
             }
@@ -189,7 +225,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Die Saison wurde nicht gefunden.');
             }
 
-            $leagueStatement = $pdo->prepare("SELECT DISTINCT l.* FROM leagues l JOIN participants p ON p.league_id=l.id WHERE l.season_id=? AND p.mail_status='sent' AND p.joined_sleeper_at IS NULL ORDER BY l.id");
+            $leagueStatement = $pdo->prepare('SELECT DISTINCT l.* FROM leagues l JOIN participants p ON p.league_id=l.id WHERE l.season_id=? AND p.invitation_league_id=p.league_id AND p.joined_sleeper_at IS NULL ORDER BY l.id');
             $leagueStatement->execute([$seasonId]);
             $leaguesToCheck = $leagueStatement->fetchAll();
             $sleeper = new SleeperClient();
@@ -208,7 +244,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $update->execute([$now, $now, $league['id'], ...$userIds]);
             }
 
-            $queue = $pdo->prepare("SELECT p.*, l.name AS league_name, l.invite_url FROM participants p JOIN leagues l ON l.id=p.league_id WHERE p.season_id=? AND p.mail_status='sent' AND p.joined_sleeper_at IS NULL ORDER BY p.id");
+            $queue = $pdo->prepare('SELECT p.*, l.name AS league_name, l.invite_url FROM participants p JOIN leagues l ON l.id=p.league_id WHERE p.season_id=? AND p.invitation_league_id=p.league_id AND p.joined_sleeper_at IS NULL ORDER BY p.id');
             $queue->execute([$seasonId]);
             $recipients = $queue->fetchAll();
             if ($recipients === []) {
@@ -266,7 +302,7 @@ if ($season) {
     $statement = $pdo->prepare('SELECT * FROM leagues WHERE season_id=? ORDER BY sort_order, id');
     $statement->execute([$season['id']]);
     $leagues = $statement->fetchAll();
-    $statement = $pdo->prepare('SELECT * FROM participants WHERE season_id=? ORDER BY name');
+    $statement = $pdo->prepare('SELECT p.*, CASE WHEN p.invitation_league_id IS NOT NULL THEN 1 ELSE 0 END AS has_received_invitation, CASE WHEN p.invitation_league_id=p.league_id THEN 1 ELSE 0 END AS invitation_sent FROM participants p WHERE p.season_id=? ORDER BY p.name');
     $statement->execute([$season['id']]);
     $participants = $statement->fetchAll();
 }
@@ -275,7 +311,8 @@ foreach ($participants as $participant) {
     $participantsByLeague[(int) ($participant['league_id'] ?? 0)][] = $participant;
 }
 $adminParticipantIds = array_filter(array_column($leagues, 'admin_participant_id'));
-$reminderCandidateCount = count(array_filter($participants, fn($participant) => $participant['mail_status'] === 'sent' && empty($participant['joined_sleeper_at'])));
+$reminderCandidateCount = count(array_filter($participants, fn($participant) => (bool) $participant['invitation_sent'] && empty($participant['joined_sleeper_at'])));
+$allocationCompleted = $season && in_array($season['status'], ['assignment_draft', 'approved'], true);
 $flash = Http::pullFlash();
 $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre Frist beendet', 'assignment_draft' => 'Zuteilung in Bearbeitung', 'approved' => 'Freigegeben'];
 ?>
@@ -351,16 +388,16 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
     </section>
 
     <section class="admin-section">
-        <div class="section-heading"><div><p class="eyebrow">Schritt 3</p><h2>Teilnehmer verteilen</h2><p>Die automatische Verteilung füllt alle Ligen gleichmäßig. Danach kannst du Karten per Drag-and-drop verschieben.</p></div><form method="post"><?= Csrf::field() ?><input type="hidden" name="action" value="allocate"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--primary" type="submit">Automatisch verteilen</button></form></div>
+        <div class="section-heading"><div><p class="eyebrow">Schritt 3</p><h2>Teilnehmer verteilen</h2><p><?= $allocationCompleted ? 'Die bestehende Verteilung bleibt unverändert. Nur unzugeteilte Nachrücker werden gleichmäßig auf freie Plätze verteilt.' : 'Du kannst einzelne Spieler zuerst per Drag-and-drop fest zuordnen. Die automatische Verteilung behält diese Zuordnungen bei und randomisiert nur den verbleibenden Rest.' ?></p></div><form method="post"<?= $allocationCompleted ? ' data-confirm="Jetzt nur die unzugeteilten Nachrücker auf freie Ligaplätze verteilen?"' : '' ?>><?= Csrf::field() ?><input type="hidden" name="action" value="allocate"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--primary" type="submit"><?= $allocationCompleted ? 'Nachrücker automatisch verteilen' : 'Rest automatisch verteilen' ?></button></form></div>
 
         <?php if (!empty($participantsByLeague[0])): ?>
         <div class="unassigned card" data-league-id="0">
             <div><h3>Nachrücker / noch nicht zugeteilt</h3><p>Ziehe eine Person auf eine Liga mit freiem Platz.</p></div>
             <div class="unassigned-list">
-                <?php foreach ($participantsByLeague[0] as $participant): $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); ?>
-                <article class="participant-card" draggable="true" data-participant-id="<?= (int) $participant['id'] ?>">
+                <?php foreach ($participantsByLeague[0] as $participant): $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); $mailDisplayStatus = $participant['invitation_sent'] ? 'sent' : $participant['mail_status']; ?>
+                <article class="participant-card" draggable="true" data-participant-id="<?= (int) $participant['id'] ?>" data-invitation-sent="<?= $participant['has_received_invitation'] ? 'true' : 'false' ?>">
                     <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span></div>
-                    <div class="card-tags"><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($participant['mail_status']) ?>" title="Mail: <?= Http::e($participant['mail_status']) ?>"></span></div>
+                    <div class="card-tags"><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($mailDisplayStatus) ?>" title="Einladung: <?= Http::e($mailDisplayStatus) ?>"></span></div>
                 </article>
                 <?php endforeach; ?>
             </div>
@@ -371,10 +408,10 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
             <div class="league-column" data-league-id="<?= (int) $league['id'] ?>">
                 <header><div><h3><?= Http::e($league['name']) ?></h3><span><?= count($leagueParticipants) ?> / <?= (int) $league['capacity'] ?></span></div></header>
                 <div class="participant-list" data-dropzone>
-                    <?php foreach ($leagueParticipants as $participant): $isAdmin = (int) $league['admin_participant_id'] === (int) $participant['id']; $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); ?>
-                    <article class="participant-card <?= $isAdmin ? 'participant-card--admin' : '' ?>" draggable="<?= $isAdmin ? 'false' : 'true' ?>" data-participant-id="<?= (int) $participant['id'] ?>">
+                    <?php foreach ($leagueParticipants as $participant): $isAdmin = (int) $league['admin_participant_id'] === (int) $participant['id']; $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); $mailDisplayStatus = $participant['invitation_sent'] ? 'sent' : $participant['mail_status']; ?>
+                    <article class="participant-card <?= $isAdmin ? 'participant-card--admin' : '' ?>" draggable="<?= $isAdmin ? 'false' : 'true' ?>" data-participant-id="<?= (int) $participant['id'] ?>" data-invitation-sent="<?= $participant['has_received_invitation'] ? 'true' : 'false' ?>">
                         <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span></div>
-                        <div class="card-tags"><?php if ($isAdmin): ?><span class="tag tag--admin">Liga-Admin</span><?php endif; ?><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><?php if ($participant['joined_sleeper_at']): ?><span class="tag tag--joined">Beigetreten</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($participant['mail_status']) ?>" title="Mail: <?= Http::e($participant['mail_status']) ?>"></span></div>
+                        <div class="card-tags"><?php if ($isAdmin): ?><span class="tag tag--admin">Liga-Admin</span><?php endif; ?><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><?php if ($participant['joined_sleeper_at']): ?><span class="tag tag--joined">Beigetreten</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($mailDisplayStatus) ?>" title="Einladung: <?= Http::e($mailDisplayStatus) ?>"></span></div>
                     </article>
                     <?php endforeach; ?>
                 </div>
@@ -384,7 +421,7 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
     </section>
 
     <section class="admin-section action-panel card">
-        <div><p class="eyebrow">Schritt 4</p><h2>Freigeben und versenden</h2><p>Zuteilungsmails gehen nur an offene Empfänger. Vor Erinnerungen wird der Sleeper-Beitritt automatisch erneut geprüft.</p></div>
+        <div><p class="eyebrow">Schritt 4</p><h2>Freigeben und versenden</h2><p>Zuteilungsmails gehen nur an neu zugeteilte Nachrücker und an Teilnehmer, deren Liga seit ihrer letzten Einladung geändert wurde. Vor Erinnerungen wird der Sleeper-Beitritt automatisch erneut geprüft.</p></div>
         <div class="action-buttons">
             <form method="post" class="test-mail-form"><?= Csrf::field() ?><input type="hidden" name="action" value="test_mail"><label class="field"><span>Testmail an</span><input type="email" name="test_email" placeholder="name@example.com" required></label><button class="button button--secondary" type="submit">Testmail senden</button></form>
             <form method="post"><?= Csrf::field() ?><input type="hidden" name="action" value="sync_sleeper"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--secondary" type="submit">Sleeper-Beitritte prüfen</button></form>
@@ -394,7 +431,7 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
     </section>
 
     <section class="admin-section">
-        <details class="card participant-table-card"><summary>Alle Anmeldungen anzeigen</summary><div class="table-scroll"><table><thead><tr><th>Name</th><th>E-Mail</th><th>Mitglied</th><th>Sleeper</th><th>Admin-Interesse</th><th>Mail</th></tr></thead><tbody><?php foreach ($participants as $participant): ?><tr><td><?= Http::e($participant['name']) ?></td><td><?= Http::e($participant['email']) ?></td><td><?= Http::e($participant['member_number']) ?></td><td>@<?= Http::e($participant['sleeper_username']) ?></td><td><?= $participant['admin_volunteer'] ? 'Ja' : 'Nein' ?></td><td><?= Http::e($participant['mail_status']) ?></td></tr><?php endforeach; ?></tbody></table></div></details>
+        <details class="card participant-table-card"><summary>Alle Anmeldungen anzeigen</summary><div class="table-scroll"><table><thead><tr><th>Name</th><th>E-Mail</th><th>Mitglied</th><th>Sleeper</th><th>Admin-Interesse</th><th>Einladung</th></tr></thead><tbody><?php foreach ($participants as $participant): ?><tr><td><?= Http::e($participant['name']) ?></td><td><?= Http::e($participant['email']) ?></td><td><?= Http::e($participant['member_number']) ?></td><td>@<?= Http::e($participant['sleeper_username']) ?></td><td><?= $participant['admin_volunteer'] ? 'Ja' : 'Nein' ?></td><td><?= $participant['invitation_sent'] ? (!empty($participant['mail_sent_at']) ? Http::e(date('d.m.Y, H:i', strtotime($participant['mail_sent_at']))) : 'Gesendet') : ($participant['has_received_invitation'] ? ($participant['mail_status'] === 'failed' ? 'Neue Einladung fehlgeschlagen' : 'Neue Einladung offen') : Http::e($participant['mail_status'])) ?></td></tr><?php endforeach; ?></tbody></table></div></details>
     </section>
     <?php endif; ?>
 </main>

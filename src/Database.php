@@ -68,6 +68,7 @@ final class Database
                 sleeper_display_name VARCHAR(120) NULL,
                 admin_volunteer {$bool} NOT NULL DEFAULT 0,
                 league_id BIGINT NULL,
+                invitation_league_id BIGINT NULL,
                 joined_sleeper_at {$timestamp} NULL,
                 mail_status VARCHAR(32) NOT NULL DEFAULT 'pending',
                 mail_sent_at {$timestamp} NULL,
@@ -109,6 +110,44 @@ final class Database
         foreach ($statements as $statement) {
             $pdo->exec($statement);
         }
+
+        if (!self::columnExists($pdo, 'participants', 'invitation_league_id', $sqlite)) {
+            $position = $sqlite ? '' : ' AFTER league_id';
+            $pdo->exec("ALTER TABLE participants ADD COLUMN invitation_league_id BIGINT NULL{$position}");
+        }
+
+        $pdo->exec(
+            "UPDATE participants
+             SET invitation_league_id=league_id
+             WHERE invitation_league_id IS NULL
+               AND league_id IS NOT NULL
+               AND (
+                   mail_sent_at IS NOT NULL
+                   OR EXISTS (
+                       SELECT 1 FROM mail_log
+                       WHERE mail_log.participant_id=participants.id
+                         AND mail_log.status='sent'
+                   )
+               )"
+        );
+    }
+
+    private static function columnExists(PDO $pdo, string $table, string $column, bool $sqlite): bool
+    {
+        if ($sqlite) {
+            foreach ($pdo->query("PRAGMA table_info({$table})")->fetchAll() as $definition) {
+                if (($definition['name'] ?? null) === $column) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        $statement = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?'
+        );
+        $statement->execute([$table, $column]);
+        return (int) $statement->fetchColumn() > 0;
     }
 }
-

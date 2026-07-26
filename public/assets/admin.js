@@ -33,6 +33,10 @@
       const targetLeague = zone.closest('[data-league-id]');
       const sourceLeague = dragged.closest('[data-league-id]');
       if (!targetLeague || targetLeague === sourceLeague) return;
+      if (
+        dragged.dataset.invitationSent === 'true'
+        && !window.confirm('Diese Person hat bereits eine Einladung erhalten. Nach der Verschiebung wird beim nächsten Zuteilungsversand eine neue Mail mit dem Link zur neuen Liga verschickt. Trotzdem verschieben?')
+      ) return;
 
       const body = new FormData();
       body.set('action', 'move_participant');
