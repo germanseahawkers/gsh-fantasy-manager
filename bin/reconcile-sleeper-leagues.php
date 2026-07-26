@@ -87,13 +87,18 @@ try {
             throw new RuntimeException('Für die Liga „' . $league['name'] . '“ fehlt eine gültige Sleeper League-ID.');
         }
 
+        $leagueUsers = [];
         foreach ($client->leagueUsers($sleeperLeagueId) as $user) {
             $userId = (string) ($user['user_id'] ?? '');
             if ($userId === '') {
                 continue;
             }
+            $leagueUsers[$userId] = (string) ($user['display_name'] ?? $user['username'] ?? $userId);
+        }
+
+        foreach ($client->leagueRosterOwners($sleeperLeagueId) as $userId) {
             $memberships[$userId][$leagueId] = true;
-            $sleeperMembers[$userId] = (string) ($user['display_name'] ?? $user['username'] ?? $userId);
+            $sleeperMembers[$userId] = $leagueUsers[$userId] ?? $userId;
         }
     }
 } catch (Throwable $exception) {

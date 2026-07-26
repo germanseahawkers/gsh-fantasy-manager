@@ -117,7 +117,7 @@ Falls App-Zuordnungen versehentlich neu verteilt wurden, können die tatsächlic
 php bin/reconcile-sleeper-leagues.php --season=latest --dry-run
 ```
 
-Der Bericht verändert keine Daten und weist Mehrfachmitgliedschaften sowie Sleeper-Nutzer ohne passende App-Anmeldung separat aus. Nur wenn die angezeigten Korrekturen plausibel sind, werden eindeutige Mitgliedschaften übernommen:
+Der Bericht verändert keine Daten und vergleicht ausschließlich die Besitzer tatsächlicher Sleeper-Roster; reine Commissioner- oder Co-Owner-Zugriffe gelten nicht als Ligateilnahme. Mehrfachmitgliedschaften sowie Roster-Besitzer ohne passende App-Anmeldung werden separat ausgewiesen. Nur wenn die angezeigten Korrekturen plausibel sind, werden eindeutige Mitgliedschaften übernommen:
 
 ```sh
 php bin/reconcile-sleeper-leagues.php --season=latest --apply

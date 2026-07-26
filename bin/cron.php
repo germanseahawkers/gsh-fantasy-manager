@@ -54,7 +54,7 @@ foreach ($approved as $season) {
     $statement->execute([$season['id']]);
     foreach ($statement->fetchAll() as $league) {
         try {
-            $userIds = array_column((new SleeperClient())->leagueUsers((string) $league['sleeper_league_id']), 'user_id');
+            $userIds = (new SleeperClient())->leagueRosterOwners((string) $league['sleeper_league_id']);
             if ($userIds === []) {
                 continue;
             }

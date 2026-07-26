@@ -234,7 +234,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!preg_match('/^[0-9]+$/', $leagueId)) {
                     throw new RuntimeException('Für die Liga „' . $league['name'] . '“ fehlt eine gültige Sleeper League-ID. Es wurden keine Erinnerungen versendet.');
                 }
-                $userIds = array_values(array_filter(array_column($sleeper->leagueUsers($leagueId), 'user_id')));
+                $userIds = $sleeper->leagueRosterOwners($leagueId);
                 if ($userIds === []) {
                     continue;
                 }
@@ -268,7 +268,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $statement->execute([$seasonId]);
             $joined = 0;
             foreach ($statement->fetchAll() as $league) {
-                $userIds = array_column((new SleeperClient())->leagueUsers((string) $league['sleeper_league_id']), 'user_id');
+                $userIds = (new SleeperClient())->leagueRosterOwners((string) $league['sleeper_league_id']);
                 if ($userIds === []) {
                     continue;
                 }

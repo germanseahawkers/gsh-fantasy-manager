@@ -32,7 +32,32 @@ final class SleeperClient
         }
 
         $response = $this->get('/league/' . $leagueId . '/users', false);
-        return array_is_list($response) ? $response : [];
+        if (!array_is_list($response)) {
+            throw new RuntimeException('Sleeper hat eine ungültige Mitgliederliste geliefert.');
+        }
+        return $response;
+    }
+
+    /** @return list<string> */
+    public function leagueRosterOwners(string $leagueId): array
+    {
+        if (!preg_match('/^[0-9]+$/', $leagueId)) {
+            return [];
+        }
+
+        $response = $this->get('/league/' . $leagueId . '/rosters', false);
+        if (!array_is_list($response)) {
+            throw new RuntimeException('Sleeper hat eine ungültige Roster-Liste geliefert.');
+        }
+
+        $ownerIds = [];
+        foreach ($response as $roster) {
+            $ownerId = (string) ($roster['owner_id'] ?? '');
+            if ($ownerId !== '') {
+                $ownerIds[$ownerId] = true;
+            }
+        }
+        return array_keys($ownerIds);
     }
 
     private function get(string $path, bool $notFoundAsEmpty = true): array
