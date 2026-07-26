@@ -81,6 +81,8 @@ Zuerst wird eine Saison angelegt, danach die gewünschte Anzahl an Ligen. Jede L
 
 Teilnehmer, die im Formular ihre Admin-Bereitschaft erklären, werden im Backend hervorgehoben. Für jede Liga wird anschließend genau ein tatsächlicher Liga-Admin ausgewählt. Derselbe Teilnehmer kann technisch nicht Admin zweier Ligen sein und bleibt bei der automatischen Verteilung in seiner Liga. Vor der ersten Randomisierung können außerdem beliebige Spieler per Drag-and-drop fest einer Liga zugeordnet werden; die automatische Verteilung behält diese Zuordnungen bei und verteilt nur die noch offenen Teilnehmer.
 
+Im ausklappbaren Teilnehmerverzeichnis kann ein fehlerhaft angegebener Sleeper-Name nachträglich korrigiert werden. Die App validiert den neuen Namen direkt bei Sleeper, übernimmt dessen feste User-ID und verhindert, dass derselbe Sleeper-Account zwei Teilnehmern zugeordnet wird. Anschließend sollte der Sleeper-Wiederherstellungs-Dry-Run erneut ausgeführt werden.
+
 Nach dem regulären Anmeldeschluss setzt der Cronjob den internen Saisonstatus auf geschlossen und erzeugt automatisch einen gleichmäßigen Zuteilungsentwurf. Das öffentliche Formular bleibt anschließend als Nachrückverfahren erreichbar. Nach bereits erfolgter Zuteilung eingehende Anmeldungen erhalten keine automatische Platzzusage und erscheinen zunächst als nicht zugeteilt, damit sie gezielt auf freie Plätze oder als Ersatz verschoben werden können. Erst der Button **Freigeben & Mails versenden** verschickt die Einladungen. So bleibt Zeit für Drag-and-drop-Korrekturen.
 
 ## E-Mail-Zustellung

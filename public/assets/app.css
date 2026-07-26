@@ -53,6 +53,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .button--primary:hover { background: var(--navy-2); }
 .button--secondary { color: var(--navy); background: #e8f1f7; }
 .button--large { width: 100%; min-height: 50px; font-size: 1.08rem; }
+.button--compact { padding: 7px 10px; font-size: .85rem; }
 .alert { max-width: 100%; margin: 0 0 20px; padding: 14px 18px; border-radius: 10px; }
 .alert--error { color: #7b1111; background: #ffebeb; border: 1px solid #f5bcbc; }
 .alert--success { color: #155d2a; background: #e4f6e8; border: 1px solid #b8e4c2; }
@@ -125,6 +126,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .participant-table-card { overflow: hidden; }
 .table-scroll { overflow-x: auto; border-top: 1px solid var(--line); }
 table { width: 100%; border-collapse: collapse; }
+.sleeper-edit-form { display: flex; align-items: center; gap: 6px; min-width: 280px; }
+.sleeper-edit-form input[name="sleeper_username"] { min-width: 140px; padding: 7px 9px; }
 th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 th { color: var(--muted); background: #f7f9fb; font-size: .78rem; text-transform: uppercase; }
 

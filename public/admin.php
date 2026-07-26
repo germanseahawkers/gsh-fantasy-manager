@@ -82,6 +82,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $pdo->prepare('UPDATE seasons SET status=?, updated_at=? WHERE id=?')->execute([$status, date('Y-m-d H:i:s'), (int) $_POST['season_id']]);
             Http::flash('success', 'Saisonstatus aktualisiert.');
+        } elseif ($action === 'update_sleeper') {
+            $participantId = (int) ($_POST['participant_id'] ?? 0);
+            $username = trim((string) ($_POST['sleeper_username'] ?? ''));
+            $participantStatement = $pdo->prepare('SELECT * FROM participants WHERE id=?');
+            $participantStatement->execute([$participantId]);
+            $participant = $participantStatement->fetch();
+            if (!$participant) {
+                throw new RuntimeException('Der Teilnehmer wurde nicht gefunden.');
+            }
+
+            $sleeperUser = (new SleeperClient())->user($username);
+            $sleeperUserId = (string) $sleeperUser['user_id'];
+            $duplicateStatement = $pdo->prepare('SELECT name FROM participants WHERE season_id=? AND sleeper_user_id=? AND id<>?');
+            $duplicateStatement->execute([$participant['season_id'], $sleeperUserId, $participantId]);
+            $duplicateName = $duplicateStatement->fetchColumn();
+            if ($duplicateName !== false) {
+                throw new RuntimeException('Dieser Sleeper-Account ist bereits „' . $duplicateName . '“ zugeordnet.');
+            }
+
+            $identityChanged = (string) $participant['sleeper_user_id'] !== $sleeperUserId;
+            $canonicalUsername = (string) ($sleeperUser['username'] ?? $username);
+            $pdo->prepare(
+                'UPDATE participants
+                 SET sleeper_username=?, sleeper_user_id=?, sleeper_display_name=?,
+                     joined_sleeper_at=?, updated_at=?
+                 WHERE id=?'
+            )->execute([
+                $canonicalUsername,
+                $sleeperUserId,
+                $sleeperUser['display_name'] ?? null,
+                $identityChanged ? null : $participant['joined_sleeper_at'],
+                date('Y-m-d H:i:s'),
+                $participantId,
+            ]);
+            Http::flash('success', 'Sleeper-Account für „' . $participant['name'] . '“ wurde auf @' . $canonicalUsername . ' aktualisiert.');
         } elseif ($action === 'add_league') {
             $now = date('Y-m-d H:i:s');
             $statement = $pdo->prepare('INSERT INTO leagues (season_id, name, capacity, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
@@ -431,7 +466,35 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
     </section>
 
     <section class="admin-section">
-        <details class="card participant-table-card"><summary>Alle Anmeldungen anzeigen</summary><div class="table-scroll"><table><thead><tr><th>Name</th><th>E-Mail</th><th>Mitglied</th><th>Sleeper</th><th>Admin-Interesse</th><th>Einladung</th></tr></thead><tbody><?php foreach ($participants as $participant): ?><tr><td><?= Http::e($participant['name']) ?></td><td><?= Http::e($participant['email']) ?></td><td><?= Http::e($participant['member_number']) ?></td><td>@<?= Http::e($participant['sleeper_username']) ?></td><td><?= $participant['admin_volunteer'] ? 'Ja' : 'Nein' ?></td><td><?= $participant['invitation_sent'] ? (!empty($participant['mail_sent_at']) ? Http::e(date('d.m.Y, H:i', strtotime($participant['mail_sent_at']))) : 'Gesendet') : ($participant['has_received_invitation'] ? ($participant['mail_status'] === 'failed' ? 'Neue Einladung fehlgeschlagen' : 'Neue Einladung offen') : Http::e($participant['mail_status'])) ?></td></tr><?php endforeach; ?></tbody></table></div></details>
+        <details class="card participant-table-card">
+            <summary>Alle Anmeldungen anzeigen</summary>
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>Name</th><th>E-Mail</th><th>Mitglied</th><th>Sleeper</th><th>Admin-Interesse</th><th>Einladung</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($participants as $participant): ?>
+                        <tr>
+                            <td><?= Http::e($participant['name']) ?></td>
+                            <td><?= Http::e($participant['email']) ?></td>
+                            <td><?= Http::e($participant['member_number']) ?></td>
+                            <td>
+                                <form method="post" class="sleeper-edit-form" data-confirm="Sleeper-Account für <?= Http::e($participant['name']) ?> wirklich aktualisieren?">
+                                    <?= Csrf::field() ?>
+                                    <input type="hidden" name="action" value="update_sleeper">
+                                    <input type="hidden" name="participant_id" value="<?= (int) $participant['id'] ?>">
+                                    <span>@</span>
+                                    <input name="sleeper_username" maxlength="100" required aria-label="Sleeper-Name für <?= Http::e($participant['name']) ?>" value="<?= Http::e($participant['sleeper_username']) ?>">
+                                    <button class="button button--secondary button--compact" type="submit">Speichern</button>
+                                </form>
+                            </td>
+                            <td><?= $participant['admin_volunteer'] ? 'Ja' : 'Nein' ?></td>
+                            <td><?= $participant['invitation_sent'] ? (!empty($participant['mail_sent_at']) ? Http::e(date('d.m.Y, H:i', strtotime($participant['mail_sent_at']))) : 'Gesendet') : ($participant['has_received_invitation'] ? ($participant['mail_status'] === 'failed' ? 'Neue Einladung fehlgeschlagen' : 'Neue Einladung offen') : Http::e($participant['mail_status'])) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </details>
     </section>
     <?php endif; ?>
 </main>
