@@ -111,6 +111,20 @@ Eine erfolgreich versendete Zuteilungsmail wird zusammen mit der Liga gespeicher
 
 Die offizielle Sleeper-API ist lesend. Die App validiert Accounts und prüft, wer der zugewiesenen Liga beigetreten ist. Ligen, Einladungslinks sowie ein nachträgliches Entfernen oder Verschieben bereits beigetretener Nutzer müssen weiterhin in Sleeper selbst verwaltet werden.
 
+Falls App-Zuordnungen versehentlich neu verteilt wurden, können die tatsächlichen Sleeper-Mitgliedschaften als sichere Quelle für eine Wiederherstellung verwendet werden. Zuerst muss zwingend ein Dry-Run ausgeführt werden:
+
+```sh
+php bin/reconcile-sleeper-leagues.php --season=latest --dry-run
+```
+
+Der Bericht verändert keine Daten und weist Mehrfachmitgliedschaften sowie Sleeper-Nutzer ohne passende App-Anmeldung separat aus. Nur wenn die angezeigten Korrekturen plausibel sind, werden eindeutige Mitgliedschaften übernommen:
+
+```sh
+php bin/reconcile-sleeper-leagues.php --season=latest --apply
+```
+
+Teilnehmer, die in keiner oder in mehreren eingerichteten Sleeper-Ligen gefunden werden, verändert das Werkzeug grundsätzlich nicht.
+
 ## Mitwirken
 
 Beiträge sind willkommen. Hinweise zur lokalen Entwicklung und zu Pull Requests stehen in [CONTRIBUTING.md](CONTRIBUTING.md). Sicherheitsrelevante Meldungen bitte gemäß [SECURITY.md](SECURITY.md) vertraulich einreichen.
