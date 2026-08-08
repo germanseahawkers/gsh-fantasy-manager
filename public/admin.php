@@ -456,11 +456,11 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
                 <header>
                     <h3><?= Http::e($league['name']) ?></h3>
                     <div class="league-occupancy" aria-label="<?= $joinedCount ?> beigetreten, <?= $invitedCount ?> eingeladen, <?= (int) $league['capacity'] ?> Plätze">
-                        <span><strong><?= $joinedCount ?></strong><small>beigetreten</small></span>
+                        <strong><?= $joinedCount ?></strong>
                         <i>/</i>
-                        <span><strong><?= $invitedCount ?></strong><small>eingeladen</small></span>
+                        <strong><?= $invitedCount ?></strong>
                         <i>/</i>
-                        <span><strong><?= (int) $league['capacity'] ?></strong><small>Plätze</small></span>
+                        <strong><?= (int) $league['capacity'] ?></strong>
                     </div>
                 </header>
                 <div class="participant-list" data-dropzone>

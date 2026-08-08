@@ -99,10 +99,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .league-column { min-height: 280px; border: 1px solid #cddae5; border-radius: 14px; background: #eaf1f6; overflow: hidden; }
 .league-column > header { padding: 16px; color: white; background: var(--navy-2); }
 .league-column h3 { margin: 0; }
-.league-occupancy { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 7px; margin-top: 12px; }
-.league-occupancy span { display: flex; flex-direction: column; min-width: 0; }
-.league-occupancy strong { font-size: 1.25rem; line-height: 1; }
-.league-occupancy small { margin-top: 4px; opacity: .75; font-size: .66rem; line-height: 1; }
+.league-occupancy { display: flex; align-items: center; gap: 7px; margin-top: 8px; }
+.league-occupancy strong { font-size: 1rem; line-height: 1; }
 .league-occupancy i { opacity: .45; font-style: normal; }
 .participant-list { min-height: 220px; padding: 10px; transition: background .15s; }
 .participant-list.is-over { background: #d5ebf7; }
