@@ -445,16 +445,44 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
         </div>
         <?php endif; ?>
         <div class="league-board">
-            <?php foreach ($leagues as $league): $leagueParticipants = $participantsByLeague[(int) $league['id']] ?? []; ?>
+            <?php foreach ($leagues as $league):
+                $leagueParticipants = $participantsByLeague[(int) $league['id']] ?? [];
+                $joinedCount = count(array_filter($leagueParticipants, fn(array $participant): bool => !empty($participant['joined_sleeper_at'])));
+                $invitedCount = count(array_filter($leagueParticipants, fn(array $participant): bool => (bool) $participant['invitation_sent']));
+                $visibleParticipants = array_filter($leagueParticipants, fn(array $participant): bool => empty($participant['joined_sleeper_at']) || (int) $league['admin_participant_id'] === (int) $participant['id']);
+                $hiddenJoinedParticipants = array_filter($leagueParticipants, fn(array $participant): bool => !empty($participant['joined_sleeper_at']) && (int) $league['admin_participant_id'] !== (int) $participant['id']);
+            ?>
             <div class="league-column" data-league-id="<?= (int) $league['id'] ?>">
-                <header><div><h3><?= Http::e($league['name']) ?></h3><span><?= count($leagueParticipants) ?> / <?= (int) $league['capacity'] ?></span></div></header>
+                <header>
+                    <h3><?= Http::e($league['name']) ?></h3>
+                    <div class="league-occupancy" aria-label="<?= $joinedCount ?> beigetreten, <?= $invitedCount ?> eingeladen, <?= (int) $league['capacity'] ?> Plätze">
+                        <span><strong><?= $joinedCount ?></strong><small>beigetreten</small></span>
+                        <i>/</i>
+                        <span><strong><?= $invitedCount ?></strong><small>eingeladen</small></span>
+                        <i>/</i>
+                        <span><strong><?= (int) $league['capacity'] ?></strong><small>Plätze</small></span>
+                    </div>
+                </header>
                 <div class="participant-list" data-dropzone>
-                    <?php foreach ($leagueParticipants as $participant): $isAdmin = (int) $league['admin_participant_id'] === (int) $participant['id']; $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); $mailDisplayStatus = $participant['invitation_sent'] ? 'sent' : $participant['mail_status']; ?>
+                    <?php foreach ($visibleParticipants as $participant): $isAdmin = (int) $league['admin_participant_id'] === (int) $participant['id']; $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); $mailDisplayStatus = $participant['invitation_sent'] ? 'sent' : $participant['mail_status']; ?>
                     <article class="participant-card <?= $isAdmin ? 'participant-card--admin' : '' ?>" draggable="<?= $isAdmin ? 'false' : 'true' ?>" data-participant-id="<?= (int) $participant['id'] ?>" data-invitation-sent="<?= $participant['has_received_invitation'] ? 'true' : 'false' ?>">
                         <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span></div>
                         <div class="card-tags"><?php if ($isAdmin): ?><span class="tag tag--admin">Liga-Admin</span><?php endif; ?><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><?php if ($participant['joined_sleeper_at']): ?><span class="tag tag--joined">Beigetreten</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($mailDisplayStatus) ?>" title="Einladung: <?= Http::e($mailDisplayStatus) ?>"></span></div>
                     </article>
                     <?php endforeach; ?>
+                    <?php if ($hiddenJoinedParticipants): ?>
+                    <details class="joined-participants">
+                        <summary>Bereits Beigetretene anzeigen (<?= count($hiddenJoinedParticipants) ?>)</summary>
+                        <div class="joined-participants-list">
+                            <?php foreach ($hiddenJoinedParticipants as $participant): $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); $mailDisplayStatus = $participant['invitation_sent'] ? 'sent' : $participant['mail_status']; ?>
+                            <article class="participant-card" draggable="true" data-participant-id="<?= (int) $participant['id'] ?>" data-invitation-sent="<?= $participant['has_received_invitation'] ? 'true' : 'false' ?>">
+                                <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span></div>
+                                <div class="card-tags"><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><span class="tag tag--joined">Beigetreten</span><span class="mail-dot mail-dot--<?= Http::e($mailDisplayStatus) ?>" title="Einladung: <?= Http::e($mailDisplayStatus) ?>"></span></div>
+                            </article>
+                            <?php endforeach; ?>
+                        </div>
+                    </details>
+                    <?php endif; ?>
                 </div>
             </div>
             <?php endforeach; ?>

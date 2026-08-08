@@ -98,8 +98,12 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .league-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
 .league-column { min-height: 280px; border: 1px solid #cddae5; border-radius: 14px; background: #eaf1f6; overflow: hidden; }
 .league-column > header { padding: 16px; color: white; background: var(--navy-2); }
-.league-column > header div { display: flex; justify-content: space-between; align-items: center; }
 .league-column h3 { margin: 0; }
+.league-occupancy { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 7px; margin-top: 12px; }
+.league-occupancy span { display: flex; flex-direction: column; min-width: 0; }
+.league-occupancy strong { font-size: 1.25rem; line-height: 1; }
+.league-occupancy small { margin-top: 4px; opacity: .75; font-size: .66rem; line-height: 1; }
+.league-occupancy i { opacity: .45; font-style: normal; }
 .participant-list { min-height: 220px; padding: 10px; transition: background .15s; }
 .participant-list.is-over { background: #d5ebf7; }
 .participant-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px; margin-bottom: 8px; background: white; border: 1px solid #d9e3eb; border-radius: 9px; box-shadow: 0 2px 5px rgba(0,29,61,.05); cursor: grab; }
@@ -114,6 +118,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .mail-dot { width: 9px; height: 9px; border-radius: 50%; background: #aeb9c3; }
 .mail-dot--sent { background: var(--green); }
 .mail-dot--failed { background: var(--red); }
+.joined-participants { margin-top: 4px; }
+.joined-participants summary { padding: 10px 8px; color: var(--navy-2); cursor: pointer; font-size: .86rem; font-weight: 700; }
+.joined-participants[open] summary { margin-bottom: 2px; }
 .unassigned { padding: 16px; margin-bottom: 16px; border-color: var(--gold); }
 .unassigned > div:first-child { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
 .unassigned h3, .unassigned p { margin-bottom: 8px; }
