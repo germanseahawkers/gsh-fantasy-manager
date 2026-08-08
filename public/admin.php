@@ -345,6 +345,12 @@ $participantsByLeague = [];
 foreach ($participants as $participant) {
     $participantsByLeague[(int) ($participant['league_id'] ?? 0)][] = $participant;
 }
+if (!empty($participantsByLeague[0])) {
+    usort($participantsByLeague[0], static function (array $left, array $right): int {
+        return strcmp((string) $left['created_at'], (string) $right['created_at'])
+            ?: ((int) $left['id'] <=> (int) $right['id']);
+    });
+}
 $adminParticipantIds = array_filter(array_column($leagues, 'admin_participant_id'));
 $reminderCandidateCount = count(array_filter($participants, fn($participant) => (bool) $participant['invitation_sent'] && empty($participant['joined_sleeper_at'])));
 $allocationCompleted = $season && in_array($season['status'], ['assignment_draft', 'approved'], true);
