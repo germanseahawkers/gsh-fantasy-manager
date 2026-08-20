@@ -190,6 +190,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ? count($assignments) . ' Nachrücker wurden auf freie Ligaplätze verteilt.'
                     : count($assignments) . ' Teilnehmer wurden gleichmäßig verteilt.');
             }
+        } elseif ($action === 'delete_participant') {
+            $participantId = (int) ($_POST['participant_id'] ?? 0);
+            $participantStatement = $pdo->prepare('SELECT * FROM participants WHERE id=?');
+            $participantStatement->execute([$participantId]);
+            $participant = $participantStatement->fetch();
+            if (!$participant) {
+                throw new RuntimeException('Der Teilnehmer wurde nicht gefunden.');
+            }
+
+            $adminCheck = $pdo->prepare('SELECT id FROM leagues WHERE admin_participant_id=?');
+            $adminCheck->execute([$participantId]);
+            if ($adminCheck->fetchColumn() !== false) {
+                throw new RuntimeException('Dieser Teilnehmer ist Liga-Admin und kann nicht gelöscht werden. Ändere zuerst die Admin-Zuordnung.');
+            }
+
+            $pdo->beginTransaction();
+            $pdo->prepare('DELETE FROM mail_log WHERE participant_id=?')->execute([$participantId]);
+            $pdo->prepare('DELETE FROM participants WHERE id=?')->execute([$participantId]);
+            $pdo->commit();
+
+            Http::flash('success', 'Teilnehmer „' . $participant['name'] . '“ wurde gelöscht.');
         } elseif ($action === 'move_participant') {
             header('Content-Type: application/json; charset=UTF-8');
             $participantId = (int) $_POST['participant_id'];
@@ -431,19 +452,21 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
     <section class="admin-section">
         <div class="section-heading"><div><p class="eyebrow">Schritt 3</p><h2>Teilnehmer verteilen</h2><p><?= $allocationCompleted ? 'Die bestehende Verteilung bleibt unverändert. Nur unzugeteilte Nachrücker werden gleichmäßig auf freie Plätze verteilt.' : 'Du kannst einzelne Spieler zuerst per Drag-and-drop fest zuordnen. Die automatische Verteilung behält diese Zuordnungen bei und randomisiert nur den verbleibenden Rest.' ?></p></div><form method="post"<?= $allocationCompleted ? ' data-confirm="Jetzt nur die unzugeteilten Nachrücker auf freie Ligaplätze verteilen?"' : '' ?>><?= Csrf::field() ?><input type="hidden" name="action" value="allocate"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--primary" type="submit"><?= $allocationCompleted ? 'Nachrücker automatisch verteilen' : 'Rest automatisch verteilen' ?></button></form></div>
 
-        <?php if (!empty($participantsByLeague[0])): ?>
         <div class="unassigned card" data-league-id="0">
-            <div><h3>Nachrücker / noch nicht zugeteilt</h3><p>Ziehe eine Person auf eine Liga mit freiem Platz.</p></div>
-            <div class="unassigned-list">
-                <?php foreach ($participantsByLeague[0] as $participant): $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); $mailDisplayStatus = $participant['invitation_sent'] ? 'sent' : $participant['mail_status']; ?>
-                <article class="participant-card" draggable="true" data-participant-id="<?= (int) $participant['id'] ?>" data-invitation-sent="<?= $participant['has_received_invitation'] ? 'true' : 'false' ?>">
-                    <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span></div>
-                    <div class="card-tags"><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($mailDisplayStatus) ?>" title="Einladung: <?= Http::e($mailDisplayStatus) ?>"></span></div>
-                </article>
-                <?php endforeach; ?>
+            <div><h3>Nachrücker / noch nicht zugeteilt</h3><p>Ziehe eine Person auf eine Liga mit freiem Platz oder hierher, um sie aus einer Liga zu entfernen.</p></div>
+            <div class="unassigned-list" data-dropzone>
+                <?php if (!empty($participantsByLeague[0])): ?>
+                    <?php foreach ($participantsByLeague[0] as $participant): $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); $mailDisplayStatus = $participant['invitation_sent'] ? 'sent' : $participant['mail_status']; ?>
+                    <article class="participant-card" draggable="true" data-participant-id="<?= (int) $participant['id'] ?>" data-invitation-sent="<?= $participant['has_received_invitation'] ? 'true' : 'false' ?>">
+                        <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span></div>
+                        <div class="card-tags"><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($mailDisplayStatus) ?>" title="Einladung: <?= Http::e($mailDisplayStatus) ?>"></span></div>
+                    </article>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <p class="empty-unassigned-notice">Keine unzugeteilten Nachrücker.</p>
+                <?php endif; ?>
             </div>
         </div>
-        <?php endif; ?>
         <div class="league-board">
             <?php foreach ($leagues as $league):
                 $leagueParticipants = $participantsByLeague[(int) $league['id']] ?? [];
@@ -504,7 +527,7 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
             <summary>Alle Anmeldungen anzeigen</summary>
             <div class="table-scroll">
                 <table>
-                    <thead><tr><th>Name</th><th>E-Mail</th><th>Mitglied</th><th>Sleeper</th><th>Admin-Interesse</th><th>Einladung</th></tr></thead>
+                    <thead><tr><th>Name</th><th>E-Mail</th><th>Mitglied</th><th>Sleeper</th><th>Admin-Interesse</th><th>Einladung</th><th>Aktionen</th></tr></thead>
                     <tbody>
                     <?php foreach ($participants as $participant): ?>
                         <tr>
@@ -523,6 +546,14 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
                             </td>
                             <td><?= $participant['admin_volunteer'] ? 'Ja' : 'Nein' ?></td>
                             <td><?= $participant['invitation_sent'] ? (!empty($participant['mail_sent_at']) ? Http::e(date('d.m.Y, H:i', strtotime($participant['mail_sent_at']))) : 'Gesendet') : ($participant['has_received_invitation'] ? ($participant['mail_status'] === 'failed' ? 'Neue Einladung fehlgeschlagen' : 'Neue Einladung offen') : Http::e($participant['mail_status'])) ?></td>
+                            <td>
+                                <form method="post" class="inline-form" data-confirm="Teilnehmer „<?= Http::e($participant['name']) ?>“ wirklich unwiderruflich löschen?">
+                                    <?= Csrf::field() ?>
+                                    <input type="hidden" name="action" value="delete_participant">
+                                    <input type="hidden" name="participant_id" value="<?= (int) $participant['id'] ?>">
+                                    <button class="button button--danger button--compact" type="submit">Löschen</button>
+                                </form>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>

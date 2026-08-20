@@ -37,3 +37,5 @@ jobs:
       - name: Run allocation tests
         run: php -d zend.assertions=1 -d assert.exception=1 tests/AllocatorTest.php
 
+      - name: Run participant tests
+        run: php -d zend.assertions=1 -d assert.exception=1 tests/ParticipantTest.php
