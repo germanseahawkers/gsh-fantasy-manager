@@ -33,7 +33,11 @@
       const targetLeague = zone.closest('[data-league-id]');
       const sourceLeague = dragged.closest('[data-league-id]');
       if (!targetLeague || targetLeague === sourceLeague) return;
-      if (
+
+      const targetLeagueId = targetLeague.dataset.leagueId;
+      if (targetLeagueId === '0') {
+        if (!window.confirm('Diese Person aus der Liga entfernen und zu den Nachrückern verschieben?')) return;
+      } else if (
         dragged.dataset.invitationSent === 'true'
         && !window.confirm('Diese Person hat bereits eine Einladung erhalten. Nach der Verschiebung wird beim nächsten Zuteilungsversand eine neue Mail mit dem Link zur neuen Liga verschickt. Trotzdem verschieben?')
       ) return;
@@ -42,7 +46,7 @@
       body.set('action', 'move_participant');
       body.set('csrf_token', csrf);
       body.set('participant_id', dragged.dataset.participantId);
-      body.set('league_id', targetLeague.dataset.leagueId);
+      body.set('league_id', targetLeagueId);
 
       try {
         const response = await fetch('/admin.php', { method: 'POST', body, credentials: 'same-origin' });

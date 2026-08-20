@@ -52,6 +52,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .button--primary { color: white; background: var(--blue); }
 .button--primary:hover { background: var(--navy-2); }
 .button--secondary { color: var(--navy); background: #e8f1f7; }
+.button--danger { color: white; background: var(--red); }
+.button--danger:hover { background: #9a1f1f; }
 .button--large { width: 100%; min-height: 50px; font-size: 1.08rem; }
 .button--compact { padding: 7px 10px; font-size: .85rem; }
 .alert { max-width: 100%; margin: 0 0 20px; padding: 14px 18px; border-radius: 10px; }
@@ -122,8 +124,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .unassigned { padding: 16px; margin-bottom: 16px; border-color: var(--gold); }
 .unassigned > div:first-child { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
 .unassigned h3, .unassigned p { margin-bottom: 8px; }
-.unassigned-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
+.unassigned-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; min-height: 60px; padding: 6px; border-radius: 8px; transition: background .15s; }
+.unassigned-list.is-over { background: #fae8c9; }
 .unassigned-list .participant-card { margin-bottom: 0; }
+.empty-unassigned-notice { color: var(--muted); margin: 0; padding: 12px 0; font-size: .9rem; font-style: italic; }
 .action-panel { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 26px; }
 .action-buttons { display: flex; gap: 12px; flex-wrap: wrap; }
 .test-mail-form { display: flex; align-items: flex-end; gap: 8px; }
