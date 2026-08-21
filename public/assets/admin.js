@@ -9,9 +9,11 @@
   });
 
   document.querySelectorAll('.participant-card[draggable="true"]').forEach((card) => {
-    card.addEventListener('dragstart', () => {
+    card.addEventListener('dragstart', (event) => {
       dragged = card;
       card.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', card.dataset.participantId);
     });
     card.addEventListener('dragend', () => {
       card.classList.remove('is-dragging');
@@ -22,6 +24,7 @@
   document.querySelectorAll('[data-dropzone]').forEach((zone) => {
     zone.addEventListener('dragover', (event) => {
       event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
       zone.classList.add('is-over');
     });
     zone.addEventListener('dragleave', () => zone.classList.remove('is-over'));

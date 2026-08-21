@@ -30,7 +30,7 @@ if (!Auth::check()):
     $flash = Http::pullFlash();
 ?>
 <!doctype html>
-<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>GSH Fantasy – Admin</title><link rel="stylesheet" href="/assets/app.css"></head>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>GSH Fantasy – Admin</title><link rel="stylesheet" href="/assets/app.css?v=<?= (int) filemtime(__DIR__ . '/assets/app.css') ?>"></head>
 <body class="admin-login"><main class="login-shell">
     <div class="login-brand"><p class="eyebrow">German Sea Hawkers</p><h1>Fantasy Admin</h1></div>
     <?php if ($flash): ?><div class="alert alert--<?= Http::e($flash['type']) ?>"><?= Http::e($flash['message']) ?></div><?php endif; ?>
@@ -362,7 +362,7 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
 ?>
 <!doctype html>
 <html lang="de">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>GSH Fantasy – Admin</title><link rel="stylesheet" href="/assets/app.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>GSH Fantasy – Admin</title><link rel="stylesheet" href="/assets/app.css?v=<?= (int) filemtime(__DIR__ . '/assets/app.css') ?>"></head>
 <body class="admin-page" data-csrf="<?= Http::e(Csrf::token()) ?>">
 <header class="admin-header"><div><p class="eyebrow">German Sea Hawkers</p><h1>Fantasy Manager</h1></div><nav><a href="/" target="_blank">Anmeldung ansehen</a><form method="post"><?= Csrf::field() ?><input type="hidden" name="action" value="logout"><button class="link-button" type="submit">Abmelden</button></form></nav></header>
 <main class="admin-main">
@@ -450,9 +450,9 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
         <div class="sleeper-audit-summary"><span>Noch kein vollständiger Sleeper-Abgleich gespeichert. Nutze „Sleeper-Beitritte &amp; Ligen prüfen“, um falsche Liga-Zuordnungen sichtbar zu machen.</span></div>
         <?php endif; ?>
 
-        <div class="unassigned card" data-league-id="0">
+        <div class="unassigned card" data-league-id="0" data-dropzone>
             <div><h3>Nachrücker / noch nicht zugeteilt</h3><p>Ziehe eine Person auf eine Liga mit freiem Platz oder hierher, um sie aus einer Liga zu entfernen.</p></div>
-            <div class="unassigned-list" data-dropzone>
+            <div class="unassigned-list">
                 <?php if (!empty($participantsByLeague[0])): ?>
                     <?php foreach ($participantsByLeague[0] as $participant): $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); $mailDisplayStatus = $participant['invitation_sent'] ? 'sent' : $participant['mail_status']; ?>
                     <article class="participant-card <?= $participant['sleeper_mismatch'] ? 'participant-card--mismatch' : '' ?>" draggable="true" data-participant-id="<?= (int) $participant['id'] ?>" data-invitation-sent="<?= $participant['has_received_invitation'] ? 'true' : 'false' ?>">
@@ -565,5 +565,5 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
     </section>
     <?php endif; ?>
 </main>
-<script src="/assets/admin.js" defer></script>
+<script src="/assets/admin.js?v=<?= (int) filemtime(__DIR__ . '/assets/admin.js') ?>" defer></script>
 </body></html>

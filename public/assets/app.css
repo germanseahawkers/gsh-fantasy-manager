@@ -128,7 +128,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .unassigned > div:first-child { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
 .unassigned h3, .unassigned p { margin-bottom: 8px; }
 .unassigned-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; min-height: 60px; padding: 6px; border-radius: 8px; transition: background .15s; }
-.unassigned-list.is-over { background: #fae8c9; }
+.unassigned.is-over { background: #fae8c9; box-shadow: 0 0 0 3px rgba(255, 179, 0, .3); }
 .unassigned-list .participant-card { margin-bottom: 0; }
 .empty-unassigned-notice { color: var(--muted); margin: 0; padding: 12px 0; font-size: .9rem; font-style: italic; }
 .sleeper-audit-summary { display: grid; gap: 5px; margin-bottom: 16px; padding: 14px 16px; color: var(--navy); background: #e8f1f7; border: 1px solid #cddae5; border-radius: 10px; }
