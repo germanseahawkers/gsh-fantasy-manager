@@ -109,12 +109,15 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .participant-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px; margin-bottom: 8px; background: white; border: 1px solid #d9e3eb; border-radius: 9px; box-shadow: 0 2px 5px rgba(0,29,61,.05); cursor: grab; }
 .participant-card.is-dragging { opacity: .45; }
 .participant-card--admin { border-left: 4px solid var(--gold); cursor: default; }
+.participant-card--mismatch { border: 2px solid var(--red); background: #fff1f1; box-shadow: 0 2px 8px rgba(184, 43, 43, .18); }
 .participant-card strong, .participant-card span { display: block; }
 .participant-card span { color: var(--muted); font-size: .82rem; }
-.card-tags { display: flex; align-items: center; gap: 6px; }
+.participant-card .mismatch-detail { margin-top: 4px; color: var(--red); font-weight: 700; }
+.card-tags { display: flex; justify-content: flex-end; align-items: center; gap: 6px; flex-wrap: wrap; }
 .tag--admin { color: #694206 !important; background: #fff0bf; }
 .tag--waitlist { color: #6c4210 !important; background: #fae8c9; }
 .tag--joined { color: #17672e !important; background: #daf4e1; }
+.tag--mismatch { color: white !important; background: var(--red); }
 .mail-dot { width: 9px; height: 9px; border-radius: 50%; background: #aeb9c3; }
 .mail-dot--sent { background: var(--green); }
 .mail-dot--failed { background: var(--red); }
@@ -128,6 +131,12 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .unassigned-list.is-over { background: #fae8c9; }
 .unassigned-list .participant-card { margin-bottom: 0; }
 .empty-unassigned-notice { color: var(--muted); margin: 0; padding: 12px 0; font-size: .9rem; font-style: italic; }
+.sleeper-audit-summary { display: grid; gap: 5px; margin-bottom: 16px; padding: 14px 16px; color: var(--navy); background: #e8f1f7; border: 1px solid #cddae5; border-radius: 10px; }
+.sleeper-audit-summary--ok { color: #17672e; background: #e5f6e9; border-color: #aadbb6; }
+.sleeper-audit-summary--warning { color: #7f1d1d; background: #fff1f1; border-color: #e8aaaa; }
+.sleeper-audit-summary ul { margin: 6px 0 0; padding-left: 20px; }
+.participant-row--mismatch td { background: #fff1f1; }
+.muted-action { color: var(--muted); font-size: .82rem; }
 .action-panel { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 26px; }
 .action-buttons { display: flex; gap: 12px; flex-wrap: wrap; }
 .test-mail-form { display: flex; align-items: flex-end; gap: 8px; }

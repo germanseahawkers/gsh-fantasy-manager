@@ -8,6 +8,8 @@ use GSH\Fantasy\Csrf;
 use GSH\Fantasy\Database;
 use GSH\Fantasy\Http;
 use GSH\Fantasy\Mailer;
+use GSH\Fantasy\ParticipantService;
+use GSH\Fantasy\SleeperAudit;
 use GSH\Fantasy\SleeperClient;
 
 require dirname(__DIR__) . '/src/bootstrap.php';
@@ -192,48 +194,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'delete_participant') {
             $participantId = (int) ($_POST['participant_id'] ?? 0);
-            $participantStatement = $pdo->prepare('SELECT * FROM participants WHERE id=?');
-            $participantStatement->execute([$participantId]);
-            $participant = $participantStatement->fetch();
-            if (!$participant) {
-                throw new RuntimeException('Der Teilnehmer wurde nicht gefunden.');
-            }
-
-            $adminCheck = $pdo->prepare('SELECT id FROM leagues WHERE admin_participant_id=?');
-            $adminCheck->execute([$participantId]);
-            if ($adminCheck->fetchColumn() !== false) {
-                throw new RuntimeException('Dieser Teilnehmer ist Liga-Admin und kann nicht gelöscht werden. Ändere zuerst die Admin-Zuordnung.');
-            }
-
-            $pdo->beginTransaction();
-            $pdo->prepare('DELETE FROM mail_log WHERE participant_id=?')->execute([$participantId]);
-            $pdo->prepare('DELETE FROM participants WHERE id=?')->execute([$participantId]);
-            $pdo->commit();
-
+            $participant = (new ParticipantService($pdo))->delete($participantId);
             Http::flash('success', 'Teilnehmer „' . $participant['name'] . '“ wurde gelöscht.');
         } elseif ($action === 'move_participant') {
             header('Content-Type: application/json; charset=UTF-8');
-            $participantId = (int) $_POST['participant_id'];
-            $leagueId = (int) $_POST['league_id'];
-            $invitationCheck = $pdo->prepare('SELECT CASE WHEN invitation_league_id IS NOT NULL THEN 1 ELSE 0 END FROM participants WHERE id=?');
-            $invitationCheck->execute([$participantId]);
-            $invitationSent = $invitationCheck->fetchColumn();
-            if ($invitationSent === false) {
-                throw new RuntimeException('Der Teilnehmer wurde nicht gefunden.');
-            }
-            $adminCheck = $pdo->prepare('SELECT id FROM leagues WHERE admin_participant_id=?');
-            $adminCheck->execute([$participantId]);
-            $adminLeague = $adminCheck->fetchColumn();
-            if ($adminLeague && (int) $adminLeague !== $leagueId) {
-                throw new RuntimeException('Dieser Teilnehmer ist Liga-Admin und bleibt fest in seiner Liga. Ändere zuerst die Admin-Zuordnung.');
-            }
-            $capacityCheck = $pdo->prepare('SELECT l.capacity, COUNT(p.id) AS current_count FROM leagues l LEFT JOIN participants p ON p.league_id=l.id WHERE l.id=? GROUP BY l.id, l.capacity');
-            $capacityCheck->execute([$leagueId]);
-            $capacity = $capacityCheck->fetch();
-            if (!$capacity || (int) $capacity['current_count'] >= (int) $capacity['capacity']) {
-                throw new RuntimeException('Diese Liga ist bereits voll.');
-            }
-            $pdo->prepare("UPDATE participants SET league_id=?, joined_sleeper_at=NULL, mail_status='pending', updated_at=? WHERE id=?")->execute([$leagueId, date('Y-m-d H:i:s'), $participantId]);
+            $leagueId = (int) ($_POST['league_id'] ?? 0);
+            (new ParticipantService($pdo))->move(
+                (int) ($_POST['participant_id'] ?? 0),
+                $leagueId > 0 ? $leagueId : null,
+            );
             echo json_encode(['ok' => true]);
             exit;
         } elseif ($action === 'test_mail') {
@@ -281,24 +250,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Die Saison wurde nicht gefunden.');
             }
 
-            $leagueStatement = $pdo->prepare('SELECT DISTINCT l.* FROM leagues l JOIN participants p ON p.league_id=l.id WHERE l.season_id=? AND p.invitation_league_id=p.league_id AND p.joined_sleeper_at IS NULL ORDER BY l.id');
-            $leagueStatement->execute([$seasonId]);
-            $leaguesToCheck = $leagueStatement->fetchAll();
-            $sleeper = new SleeperClient();
-            foreach ($leaguesToCheck as $league) {
-                $leagueId = trim((string) ($league['sleeper_league_id'] ?? ''));
-                if (!preg_match('/^[0-9]+$/', $leagueId)) {
-                    throw new RuntimeException('Für die Liga „' . $league['name'] . '“ fehlt eine gültige Sleeper League-ID. Es wurden keine Erinnerungen versendet.');
-                }
-                $userIds = $sleeper->leagueRosterOwners($leagueId);
-                if ($userIds === []) {
-                    continue;
-                }
-                $placeholders = implode(',', array_fill(0, count($userIds), '?'));
-                $now = date('Y-m-d H:i:s');
-                $update = $pdo->prepare("UPDATE participants SET joined_sleeper_at=?, updated_at=? WHERE league_id=? AND sleeper_user_id IN ({$placeholders})");
-                $update->execute([$now, $now, $league['id'], ...$userIds]);
-            }
+            (new SleeperAudit($pdo))->sync($seasonId);
 
             $queue = $pdo->prepare('SELECT p.*, l.name AS league_name, l.invite_url FROM participants p JOIN leagues l ON l.id=p.league_id WHERE p.season_id=? AND p.invitation_league_id=p.league_id AND p.joined_sleeper_at IS NULL ORDER BY p.id');
             $queue->execute([$seasonId]);
@@ -320,20 +272,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'sync_sleeper') {
             $seasonId = (int) $_POST['season_id'];
-            $statement = $pdo->prepare('SELECT * FROM leagues WHERE season_id=? AND sleeper_league_id IS NOT NULL');
-            $statement->execute([$seasonId]);
-            $joined = 0;
-            foreach ($statement->fetchAll() as $league) {
-                $userIds = (new SleeperClient())->leagueRosterOwners((string) $league['sleeper_league_id']);
-                if ($userIds === []) {
-                    continue;
-                }
-                $placeholders = implode(',', array_fill(0, count($userIds), '?'));
-                $update = $pdo->prepare("UPDATE participants SET joined_sleeper_at=?, updated_at=? WHERE league_id=? AND sleeper_user_id IN ({$placeholders})");
-                $update->execute([date('Y-m-d H:i:s'), date('Y-m-d H:i:s'), $league['id'], ...$userIds]);
-                $joined += $update->rowCount();
-            }
-            Http::flash('success', "Sleeper-Abgleich abgeschlossen: {$joined} neue/aktualisierte Zuordnungen.");
+            $result = (new SleeperAudit($pdo))->sync($seasonId);
+            Http::flash(
+                ($result['mismatches'] || $result['unknown']) ? 'error' : 'success',
+                "Sleeper-Abgleich abgeschlossen: {$result['joined']} korrekt beigetreten, {$result['mismatches']} abweichende Zuordnungen, {$result['unknown']} Sleeper-Mitglieder ohne App-Anmeldung."
+            );
         }
     } catch (Throwable $exception) {
         if ($pdo->inTransaction()) {
@@ -354,6 +297,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $season = $pdo->query('SELECT * FROM seasons ORDER BY registration_closes_at DESC LIMIT 1')->fetch() ?: null;
 $leagues = [];
 $participants = [];
+$unknownSleeperMembers = [];
+$sleeperAuditCheckedAt = null;
 if ($season) {
     $statement = $pdo->prepare('SELECT * FROM leagues WHERE season_id=? ORDER BY sort_order, id');
     $statement->execute([$season['id']]);
@@ -361,6 +306,42 @@ if ($season) {
     $statement = $pdo->prepare('SELECT p.*, CASE WHEN p.invitation_league_id IS NOT NULL THEN 1 ELSE 0 END AS has_received_invitation, CASE WHEN p.invitation_league_id=p.league_id THEN 1 ELSE 0 END AS invitation_sent FROM participants p WHERE p.season_id=? ORDER BY p.name');
     $statement->execute([$season['id']]);
     $participants = $statement->fetchAll();
+
+    $leagueNamesById = [];
+    foreach ($leagues as $league) {
+        $leagueNamesById[(int) $league['id']] = (string) $league['name'];
+    }
+    $auditStatement = $pdo->prepare('SELECT * FROM sleeper_audit_memberships WHERE season_id=? ORDER BY display_name');
+    $auditStatement->execute([$season['id']]);
+    $auditBySleeperId = [];
+    foreach ($auditStatement->fetchAll() as $auditEntry) {
+        $leagueIds = array_values(array_filter(array_map('intval', explode(',', (string) $auditEntry['league_ids']))));
+        $auditEntry['league_ids_parsed'] = $leagueIds;
+        $auditEntry['league_names'] = array_map(
+            static fn(int $leagueId): string => $leagueNamesById[$leagueId] ?? 'Unbekannte Liga',
+            $leagueIds
+        );
+        $auditBySleeperId[(string) $auditEntry['sleeper_user_id']] = $auditEntry;
+    }
+    $sleeperAuditCheckedAt = $season['sleeper_checked_at'] ?? null;
+    $knownSleeperIds = [];
+    foreach ($participants as &$participant) {
+        $sleeperId = (string) $participant['sleeper_user_id'];
+        $knownSleeperIds[$sleeperId] = true;
+        $auditEntry = $auditBySleeperId[$sleeperId] ?? null;
+        $actualLeagueIds = $auditEntry['league_ids_parsed'] ?? [];
+        $participant['sleeper_actual_league_names'] = $auditEntry['league_names'] ?? [];
+        $participant['sleeper_mismatch'] = SleeperAudit::isMismatch(
+            !empty($participant['league_id']) ? (int) $participant['league_id'] : null,
+            $actualLeagueIds,
+        );
+    }
+    unset($participant);
+    foreach ($auditBySleeperId as $sleeperId => $auditEntry) {
+        if (!isset($knownSleeperIds[$sleeperId])) {
+            $unknownSleeperMembers[] = $auditEntry;
+        }
+    }
 }
 $participantsByLeague = [];
 foreach ($participants as $participant) {
@@ -373,6 +354,7 @@ if (!empty($participantsByLeague[0])) {
     });
 }
 $adminParticipantIds = array_filter(array_column($leagues, 'admin_participant_id'));
+$sleeperMismatchCount = count(array_filter($participants, fn(array $participant): bool => (bool) ($participant['sleeper_mismatch'] ?? false)));
 $reminderCandidateCount = count(array_filter($participants, fn($participant) => (bool) $participant['invitation_sent'] && empty($participant['joined_sleeper_at'])));
 $allocationCompleted = $season && in_array($season['status'], ['assignment_draft', 'approved'], true);
 $flash = Http::pullFlash();
@@ -452,14 +434,30 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
     <section class="admin-section">
         <div class="section-heading"><div><p class="eyebrow">Schritt 3</p><h2>Teilnehmer verteilen</h2><p><?= $allocationCompleted ? 'Die bestehende Verteilung bleibt unverändert. Nur unzugeteilte Nachrücker werden gleichmäßig auf freie Plätze verteilt.' : 'Du kannst einzelne Spieler zuerst per Drag-and-drop fest zuordnen. Die automatische Verteilung behält diese Zuordnungen bei und randomisiert nur den verbleibenden Rest.' ?></p></div><form method="post"<?= $allocationCompleted ? ' data-confirm="Jetzt nur die unzugeteilten Nachrücker auf freie Ligaplätze verteilen?"' : '' ?>><?= Csrf::field() ?><input type="hidden" name="action" value="allocate"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--primary" type="submit"><?= $allocationCompleted ? 'Nachrücker automatisch verteilen' : 'Rest automatisch verteilen' ?></button></form></div>
 
+        <?php if ($sleeperAuditCheckedAt): ?>
+        <div class="sleeper-audit-summary <?= ($sleeperMismatchCount || $unknownSleeperMembers) ? 'sleeper-audit-summary--warning' : 'sleeper-audit-summary--ok' ?>">
+            <strong>Sleeper-Abgleich vom <?= Http::e(date('d.m.Y, H:i', strtotime((string) $sleeperAuditCheckedAt))) ?></strong>
+            <span><?= $sleeperMismatchCount ?> abweichende Zuordnung<?= $sleeperMismatchCount === 1 ? '' : 'en' ?> · <?= count($unknownSleeperMembers) ?> Mitglied<?= count($unknownSleeperMembers) === 1 ? '' : 'er' ?> ohne App-Anmeldung</span>
+            <?php if ($unknownSleeperMembers): ?>
+            <ul>
+                <?php foreach ($unknownSleeperMembers as $member): ?>
+                <li><?= Http::e($member['display_name']) ?> · Sleeper: <?= Http::e(implode(', ', $member['league_names'])) ?></li>
+                <?php endforeach; ?>
+            </ul>
+            <?php endif; ?>
+        </div>
+        <?php else: ?>
+        <div class="sleeper-audit-summary"><span>Noch kein vollständiger Sleeper-Abgleich gespeichert. Nutze „Sleeper-Beitritte &amp; Ligen prüfen“, um falsche Liga-Zuordnungen sichtbar zu machen.</span></div>
+        <?php endif; ?>
+
         <div class="unassigned card" data-league-id="0">
             <div><h3>Nachrücker / noch nicht zugeteilt</h3><p>Ziehe eine Person auf eine Liga mit freiem Platz oder hierher, um sie aus einer Liga zu entfernen.</p></div>
             <div class="unassigned-list" data-dropzone>
                 <?php if (!empty($participantsByLeague[0])): ?>
                     <?php foreach ($participantsByLeague[0] as $participant): $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); $mailDisplayStatus = $participant['invitation_sent'] ? 'sent' : $participant['mail_status']; ?>
-                    <article class="participant-card" draggable="true" data-participant-id="<?= (int) $participant['id'] ?>" data-invitation-sent="<?= $participant['has_received_invitation'] ? 'true' : 'false' ?>">
-                        <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span></div>
-                        <div class="card-tags"><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($mailDisplayStatus) ?>" title="Einladung: <?= Http::e($mailDisplayStatus) ?>"></span></div>
+                    <article class="participant-card <?= $participant['sleeper_mismatch'] ? 'participant-card--mismatch' : '' ?>" draggable="true" data-participant-id="<?= (int) $participant['id'] ?>" data-invitation-sent="<?= $participant['has_received_invitation'] ? 'true' : 'false' ?>">
+                        <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span><?php if ($participant['sleeper_mismatch']): ?><span class="mismatch-detail">Sleeper: <?= Http::e(implode(', ', $participant['sleeper_actual_league_names'])) ?></span><?php endif; ?></div>
+                        <div class="card-tags"><?php if ($participant['sleeper_mismatch']): ?><span class="tag tag--mismatch">Falsche Liga</span><?php endif; ?><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($mailDisplayStatus) ?>" title="Einladung: <?= Http::e($mailDisplayStatus) ?>"></span></div>
                     </article>
                     <?php endforeach; ?>
                 <?php else: ?>
@@ -472,8 +470,8 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
                 $leagueParticipants = $participantsByLeague[(int) $league['id']] ?? [];
                 $joinedCount = count(array_filter($leagueParticipants, fn(array $participant): bool => !empty($participant['joined_sleeper_at'])));
                 $invitedCount = count(array_filter($leagueParticipants, fn(array $participant): bool => (bool) $participant['invitation_sent']));
-                $visibleParticipants = array_filter($leagueParticipants, fn(array $participant): bool => empty($participant['joined_sleeper_at']) || (int) $league['admin_participant_id'] === (int) $participant['id']);
-                $hiddenJoinedParticipants = array_filter($leagueParticipants, fn(array $participant): bool => !empty($participant['joined_sleeper_at']) && (int) $league['admin_participant_id'] !== (int) $participant['id']);
+                $visibleParticipants = array_filter($leagueParticipants, fn(array $participant): bool => empty($participant['joined_sleeper_at']) || (bool) $participant['sleeper_mismatch'] || (int) $league['admin_participant_id'] === (int) $participant['id']);
+                $hiddenJoinedParticipants = array_filter($leagueParticipants, fn(array $participant): bool => !empty($participant['joined_sleeper_at']) && !(bool) $participant['sleeper_mismatch'] && (int) $league['admin_participant_id'] !== (int) $participant['id']);
             ?>
             <div class="league-column" data-league-id="<?= (int) $league['id'] ?>">
                 <header>
@@ -488,9 +486,9 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
                 </header>
                 <div class="participant-list" data-dropzone>
                     <?php foreach ($visibleParticipants as $participant): $isAdmin = (int) $league['admin_participant_id'] === (int) $participant['id']; $isWaitlist = strtotime($participant['created_at']) > strtotime($season['registration_closes_at']); $mailDisplayStatus = $participant['invitation_sent'] ? 'sent' : $participant['mail_status']; ?>
-                    <article class="participant-card <?= $isAdmin ? 'participant-card--admin' : '' ?>" draggable="<?= $isAdmin ? 'false' : 'true' ?>" data-participant-id="<?= (int) $participant['id'] ?>" data-invitation-sent="<?= $participant['has_received_invitation'] ? 'true' : 'false' ?>">
-                        <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span></div>
-                        <div class="card-tags"><?php if ($isAdmin): ?><span class="tag tag--admin">Liga-Admin</span><?php endif; ?><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><?php if ($participant['joined_sleeper_at']): ?><span class="tag tag--joined">Beigetreten</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($mailDisplayStatus) ?>" title="Einladung: <?= Http::e($mailDisplayStatus) ?>"></span></div>
+                    <article class="participant-card <?= $isAdmin ? 'participant-card--admin' : '' ?> <?= $participant['sleeper_mismatch'] ? 'participant-card--mismatch' : '' ?>" draggable="<?= $isAdmin ? 'false' : 'true' ?>" data-participant-id="<?= (int) $participant['id'] ?>" data-invitation-sent="<?= $participant['has_received_invitation'] ? 'true' : 'false' ?>">
+                        <div><strong><?= Http::e($participant['name']) ?></strong><span>@<?= Http::e($participant['sleeper_username']) ?></span><?php if ($participant['sleeper_mismatch']): ?><span class="mismatch-detail">Sleeper: <?= Http::e(implode(', ', $participant['sleeper_actual_league_names'])) ?></span><?php endif; ?></div>
+                        <div class="card-tags"><?php if ($participant['sleeper_mismatch']): ?><span class="tag tag--mismatch">Falsche Liga</span><?php endif; ?><?php if ($isAdmin): ?><span class="tag tag--admin">Liga-Admin</span><?php endif; ?><?php if ($isWaitlist): ?><span class="tag tag--waitlist">Nachrücker</span><?php endif; ?><?php if ($participant['joined_sleeper_at']): ?><span class="tag tag--joined">Beigetreten</span><?php endif; ?><span class="mail-dot mail-dot--<?= Http::e($mailDisplayStatus) ?>" title="Einladung: <?= Http::e($mailDisplayStatus) ?>"></span></div>
                     </article>
                     <?php endforeach; ?>
                     <?php if ($hiddenJoinedParticipants): ?>
@@ -516,7 +514,7 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
         <div><p class="eyebrow">Schritt 4</p><h2>Freigeben und versenden</h2><p>Zuteilungsmails gehen nur an neu zugeteilte Nachrücker und an Teilnehmer, deren Liga seit ihrer letzten Einladung geändert wurde. Vor Erinnerungen wird der Sleeper-Beitritt automatisch erneut geprüft.</p></div>
         <div class="action-buttons">
             <form method="post" class="test-mail-form"><?= Csrf::field() ?><input type="hidden" name="action" value="test_mail"><label class="field"><span>Testmail an</span><input type="email" name="test_email" placeholder="name@example.com" required></label><button class="button button--secondary" type="submit">Testmail senden</button></form>
-            <form method="post"><?= Csrf::field() ?><input type="hidden" name="action" value="sync_sleeper"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--secondary" type="submit">Sleeper-Beitritte prüfen</button></form>
+            <form method="post"><?= Csrf::field() ?><input type="hidden" name="action" value="sync_sleeper"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--secondary" type="submit">Sleeper-Beitritte &amp; Ligen prüfen</button></form>
             <form method="post" data-confirm="Sleeper-Beitritte jetzt prüfen und danach nur noch nicht beigetretene Teilnehmer erinnern?"><?= Csrf::field() ?><input type="hidden" name="action" value="send_reminders"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--secondary" type="submit">Nicht Beigetretene erinnern (<?= $reminderCandidateCount ?>)</button></form>
             <form method="post" data-confirm="Jetzt alle offenen Zuteilungsmails versenden?"><?= Csrf::field() ?><input type="hidden" name="action" value="send_mails"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--primary" type="submit">Freigeben & Mails versenden</button></form>
         </div>
@@ -530,7 +528,7 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
                     <thead><tr><th>Name</th><th>E-Mail</th><th>Mitglied</th><th>Sleeper</th><th>Admin-Interesse</th><th>Einladung</th><th>Aktionen</th></tr></thead>
                     <tbody>
                     <?php foreach ($participants as $participant): ?>
-                        <tr>
+                        <tr class="<?= $participant['sleeper_mismatch'] ? 'participant-row--mismatch' : '' ?>">
                             <td><?= Http::e($participant['name']) ?></td>
                             <td><?= Http::e($participant['email']) ?></td>
                             <td><?= Http::e($participant['member_number']) ?></td>
@@ -547,12 +545,16 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
                             <td><?= $participant['admin_volunteer'] ? 'Ja' : 'Nein' ?></td>
                             <td><?= $participant['invitation_sent'] ? (!empty($participant['mail_sent_at']) ? Http::e(date('d.m.Y, H:i', strtotime($participant['mail_sent_at']))) : 'Gesendet') : ($participant['has_received_invitation'] ? ($participant['mail_status'] === 'failed' ? 'Neue Einladung fehlgeschlagen' : 'Neue Einladung offen') : Http::e($participant['mail_status'])) ?></td>
                             <td>
-                                <form method="post" class="inline-form" data-confirm="Teilnehmer „<?= Http::e($participant['name']) ?>“ wirklich unwiderruflich löschen?">
+                                <?php if (in_array((int) $participant['id'], array_map('intval', $adminParticipantIds), true)): ?>
+                                <span class="muted-action">Erst Admin-Zuordnung ändern</span>
+                                <?php else: ?>
+                                <form method="post" class="inline-form" data-confirm="Teilnehmer „<?= Http::e($participant['name']) ?>“ wirklich unwiderruflich aus dem Fantasy Manager löschen? Eine bestehende Mitgliedschaft in Sleeper wird dadurch nicht entfernt und muss dort separat gelöscht werden.">
                                     <?= Csrf::field() ?>
                                     <input type="hidden" name="action" value="delete_participant">
                                     <input type="hidden" name="participant_id" value="<?= (int) $participant['id'] ?>">
                                     <button class="button button--danger button--compact" type="submit">Löschen</button>
                                 </form>
+                                <?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>

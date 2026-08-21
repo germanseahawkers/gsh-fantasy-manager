@@ -54,6 +54,7 @@ final class Database
                 status VARCHAR(32) NOT NULL DEFAULT 'open',
                 email_subject VARCHAR(255) NOT NULL DEFAULT 'Deine GSH Fantasy-Liga',
                 email_intro TEXT NULL,
+                sleeper_checked_at {$timestamp} NULL,
                 created_at {$timestamp} NOT NULL,
                 updated_at {$timestamp} NOT NULL
             )",
@@ -100,6 +101,15 @@ final class Database
                 error_message TEXT NULL,
                 created_at {$timestamp} NOT NULL
             )",
+            "CREATE TABLE IF NOT EXISTS sleeper_audit_memberships (
+                id {$id},
+                season_id BIGINT NOT NULL,
+                sleeper_user_id VARCHAR(40) NOT NULL,
+                display_name VARCHAR(120) NOT NULL,
+                league_ids VARCHAR(500) NOT NULL,
+                checked_at {$timestamp} NOT NULL,
+                UNIQUE (season_id, sleeper_user_id)
+            )",
             "CREATE TABLE IF NOT EXISTS login_attempts (
                 id {$id},
                 ip_hash VARCHAR(64) NOT NULL,
@@ -114,6 +124,10 @@ final class Database
         if (!self::columnExists($pdo, 'participants', 'invitation_league_id', $sqlite)) {
             $position = $sqlite ? '' : ' AFTER league_id';
             $pdo->exec("ALTER TABLE participants ADD COLUMN invitation_league_id BIGINT NULL{$position}");
+        }
+        if (!self::columnExists($pdo, 'seasons', 'sleeper_checked_at', $sqlite)) {
+            $position = $sqlite ? '' : ' AFTER email_intro';
+            $pdo->exec("ALTER TABLE seasons ADD COLUMN sleeper_checked_at {$timestamp} NULL{$position}");
         }
 
         $pdo->exec(
