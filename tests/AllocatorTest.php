@@ -54,14 +54,29 @@ $waitlistResult = $allocator->allocateUnassigned([
 assert(count(array_filter($waitlistResult, static fn (int $league): bool => $league === 10)) === 1);
 assert(count(array_filter($waitlistResult, static fn (int $league): bool => $league === 20)) === 2);
 
-$waitlistOverflowRejected = false;
-try {
-    $allocator->allocateUnassigned([
-        ['id' => 10, 'capacity' => 4, 'current_count' => 4],
-    ], [['id' => 12]], 42);
-} catch (RuntimeException) {
-    $waitlistOverflowRejected = true;
-}
-assert($waitlistOverflowRejected, 'Nachrücker dürfen nicht über die Liga-Kapazität hinaus verteilt werden.');
+$fullLeagueResult = $allocator->allocateUnassigned([
+    ['id' => 10, 'capacity' => 4, 'current_count' => 4],
+], [['id' => 12, 'created_at' => '2026-07-01 10:00:00']], 42);
+assert($fullLeagueResult === [], 'Nachrücker müssen bei voller Liga auf der Warteliste bleiben.');
+
+$firstComeResult = $allocator->allocateUnassigned([
+    ['id' => 10, 'capacity' => 4, 'current_count' => 3],
+], [
+    ['id' => 30, 'created_at' => '2026-07-03 10:00:00'],
+    ['id' => 20, 'created_at' => '2026-07-01 10:00:00'],
+    ['id' => 10, 'created_at' => '2026-07-02 10:00:00'],
+], 42);
+assert(array_keys($firstComeResult) === [20], 'Der früheste Nachrücker muss den ersten freien Platz erhalten.');
+
+$initialOverflowResult = $allocator->allocate([
+    ['id' => 10, 'capacity' => 3, 'admin_participant_id' => 1],
+], [
+    ['id' => 1, 'league_id' => 10, 'created_at' => '2026-07-04 10:00:00'],
+    ['id' => 4, 'league_id' => null, 'created_at' => '2026-07-04 10:00:00'],
+    ['id' => 3, 'league_id' => null, 'created_at' => '2026-07-03 10:00:00'],
+    ['id' => 2, 'league_id' => null, 'created_at' => '2026-07-02 10:00:00'],
+], 42);
+assert(isset($initialOverflowResult[2], $initialOverflowResult[3]), 'Die frühesten Anmeldungen müssen berücksichtigt werden.');
+assert(!isset($initialOverflowResult[4]), 'Eine spätere Anmeldung muss bei ausgeschöpfter Kapazität auf der Warteliste bleiben.');
 
 fwrite(STDOUT, "AllocatorTest erfolgreich.\n");

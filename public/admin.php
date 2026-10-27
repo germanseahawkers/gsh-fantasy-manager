@@ -6,6 +6,7 @@ use GSH\Fantasy\Allocator;
 use GSH\Fantasy\Auth;
 use GSH\Fantasy\Csrf;
 use GSH\Fantasy\Database;
+use GSH\Fantasy\FairPlayService;
 use GSH\Fantasy\Http;
 use GSH\Fantasy\Mailer;
 use GSH\Fantasy\ParticipantService;
@@ -63,16 +64,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 !empty($_POST['draft_at']) ? str_replace('T', ' ', (string) $_POST['draft_at']) . ':00' : null,
                 trim((string) $_POST['email_subject']),
                 trim((string) $_POST['email_intro']),
+                (string) ($_POST['fair_play_mode'] ?? 'test'),
             ];
-            if ($values[0] === '' || strtotime($values[1]) >= strtotime($values[2])) {
+            if ($values[0] === '' || strtotime($values[1]) >= strtotime($values[2]) || !in_array($values[6], ['test', 'counted', 'exclusion'], true)) {
                 throw new RuntimeException('Bitte prüfe Saisonname und Anmeldezeitraum.');
             }
             $now = date('Y-m-d H:i:s');
             if ($id > 0) {
-                $statement = $pdo->prepare('UPDATE seasons SET name=?, registration_opens_at=?, registration_closes_at=?, draft_at=?, email_subject=?, email_intro=?, updated_at=? WHERE id=?');
+                $statement = $pdo->prepare('UPDATE seasons SET name=?, registration_opens_at=?, registration_closes_at=?, draft_at=?, email_subject=?, email_intro=?, fair_play_mode=?, updated_at=? WHERE id=?');
                 $statement->execute([...$values, $now, $id]);
             } else {
-                $statement = $pdo->prepare('INSERT INTO seasons (name, registration_opens_at, registration_closes_at, draft_at, email_subject, email_intro, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+                $statement = $pdo->prepare('INSERT INTO seasons (name, registration_opens_at, registration_closes_at, draft_at, email_subject, email_intro, fair_play_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
                 $statement->execute([...$values, $now, $now]);
             }
             Http::flash('success', 'Saisondaten gespeichert.');
@@ -166,18 +168,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($isWaitlistAllocation) {
                 $leagueStatement = $pdo->prepare('SELECT l.id, l.capacity, COUNT(p.id) AS current_count FROM leagues l LEFT JOIN participants p ON p.league_id=l.id WHERE l.season_id=? GROUP BY l.id, l.capacity, l.sort_order ORDER BY l.sort_order, l.id');
                 $leagueStatement->execute([$seasonId]);
-                $participantStatement = $pdo->prepare('SELECT id FROM participants WHERE season_id=? AND league_id IS NULL ORDER BY id');
+                $participantStatement = $pdo->prepare('SELECT id, created_at FROM participants WHERE season_id=? AND league_id IS NULL ORDER BY created_at, id');
                 $participantStatement->execute([$seasonId]);
-                $assignments = (new Allocator())->allocateUnassigned($leagueStatement->fetchAll(), $participantStatement->fetchAll());
+                $unassignedParticipants = $participantStatement->fetchAll();
+                $assignments = (new Allocator())->allocateUnassigned($leagueStatement->fetchAll(), $unassignedParticipants);
             } else {
                 $leagueStatement = $pdo->prepare('SELECT id, capacity, admin_participant_id FROM leagues WHERE season_id=? ORDER BY sort_order, id');
                 $leagueStatement->execute([$seasonId]);
-                $participantStatement = $pdo->prepare('SELECT id, league_id FROM participants WHERE season_id=?');
+                $participantStatement = $pdo->prepare('SELECT id, league_id, created_at FROM participants WHERE season_id=? ORDER BY created_at, id');
                 $participantStatement->execute([$seasonId]);
                 $assignments = (new Allocator())->allocate($leagueStatement->fetchAll(), $participantStatement->fetchAll());
             }
             if ($assignments === []) {
-                Http::flash('success', 'Es sind aktuell keine unzugeteilten Nachrücker vorhanden.');
+                Http::flash('success', $isWaitlistAllocation && !empty($unassignedParticipants)
+                    ? 'Alle Ligaplätze sind belegt. Die Nachrücker bleiben in der Reihenfolge ihrer Anmeldung auf der Warteliste.'
+                    : 'Es sind aktuell keine unzugeteilten Nachrücker vorhanden.');
             } else {
                 $pdo->beginTransaction();
                 $update = $pdo->prepare('UPDATE participants SET league_id=?, mail_status=?, updated_at=? WHERE id=?');
@@ -277,6 +282,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ($result['mismatches'] || $result['unknown']) ? 'error' : 'success',
                 "Sleeper-Abgleich abgeschlossen: {$result['joined']} korrekt beigetreten, {$result['mismatches']} abweichende Zuordnungen, {$result['unknown']} Sleeper-Mitglieder ohne App-Anmeldung."
             );
+        } elseif ($action === 'run_fair_play') {
+            $result = (new FairPlayService($pdo))->run((int) $_POST['season_id'], true);
+            Http::flash(
+                'success',
+                "Fair-Play-Prüfung für Woche {$result['week']} gespeichert: {$result['flagged']} aktuell auffällige Starter, {$result['suggestions']} Vorschläge aus abgeschlossenen Wochen."
+            );
+        } elseif ($action === 'backfill_fair_play') {
+            $result = (new FairPlayService($pdo))->backfillCompletedWeeks((int) $_POST['season_id']);
+            Http::flash(
+                'success',
+                "Rückprüfung abgeschlossen: {$result['weeks']} Spieltage und {$result['leagues']} Ligen geprüft, {$result['created']} neue manuelle Prüfhinweise angelegt."
+            );
+        } elseif ($action === 'review_strike') {
+            $status = (string) ($_POST['status'] ?? '');
+            (new FairPlayService($pdo))->review((int) ($_POST['strike_id'] ?? 0), $status);
+            $message = match ($status) {
+                'confirmed' => 'Strike wurde bestätigt.',
+                'dismissed' => 'Strike-Vorschlag wurde verworfen.',
+                default => 'Entscheidung wurde zurückgesetzt.',
+            };
+            Http::flash('success', $message);
         }
     } catch (Throwable $exception) {
         if ($pdo->inTransaction()) {
@@ -299,6 +325,8 @@ $leagues = [];
 $participants = [];
 $unknownSleeperMembers = [];
 $sleeperAuditCheckedAt = null;
+$fairPlayStrikes = [];
+$fairPlayActiveEvidence = [];
 if ($season) {
     $statement = $pdo->prepare('SELECT * FROM leagues WHERE season_id=? ORDER BY sort_order, id');
     $statement->execute([$season['id']]);
@@ -342,6 +370,21 @@ if ($season) {
             $unknownSleeperMembers[] = $auditEntry;
         }
     }
+
+    $strikeStatement = $pdo->prepare(
+        'SELECT s.*, l.name AS league_name FROM fair_play_strikes s JOIN leagues l ON l.id=s.league_id WHERE s.season_id=? ORDER BY s.week DESC, s.participant_name'
+    );
+    $strikeStatement->execute([$season['id']]);
+    foreach ($strikeStatement->fetchAll() as $strike) {
+        $decodedEvidence = json_decode((string) $strike['evidence_json'], true);
+        $strike['evidence'] = is_array($decodedEvidence) ? $decodedEvidence : [];
+        $fairPlayStrikes[] = $strike;
+    }
+    $evidenceStatement = $pdo->prepare(
+        'SELECT e.*, l.name AS league_name FROM fair_play_lineup_evidence e JOIN leagues l ON l.id=e.league_id WHERE e.season_id=? AND e.currently_flagged=1 ORDER BY e.week DESC, e.participant_name, e.player_name'
+    );
+    $evidenceStatement->execute([$season['id']]);
+    $fairPlayActiveEvidence = $evidenceStatement->fetchAll();
 }
 $participantsByLeague = [];
 foreach ($participants as $participant) {
@@ -357,6 +400,7 @@ $adminParticipantIds = array_filter(array_column($leagues, 'admin_participant_id
 $sleeperMismatchCount = count(array_filter($participants, fn(array $participant): bool => (bool) ($participant['sleeper_mismatch'] ?? false)));
 $reminderCandidateCount = count(array_filter($participants, fn($participant) => (bool) $participant['invitation_sent'] && empty($participant['joined_sleeper_at'])));
 $allocationCompleted = $season && in_array($season['status'], ['assignment_draft', 'approved'], true);
+$fairPlayModeLabels = ['test' => 'Testbetrieb – Strikes zählen nicht', 'counted' => 'Strikes zählen', 'exclusion' => 'Strikes zählen für Ausschlussprüfung'];
 $flash = Http::pullFlash();
 $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre Frist beendet', 'assignment_draft' => 'Zuteilung in Bearbeitung', 'approved' => 'Freigegeben'];
 ?>
@@ -379,6 +423,7 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
                 <label class="field"><span>Draft</span><input type="datetime-local" name="draft_at" value="<?= Http::e(!empty($season['draft_at']) ? date('Y-m-d\TH:i', strtotime($season['draft_at'])) : '2026-09-06T20:00') ?>"></label>
                 <label class="field field--wide"><span>Mail-Betreff</span><input name="email_subject" required value="<?= Http::e($season['email_subject'] ?? 'Deine GSH Fantasy-Liga') ?>"></label>
                 <label class="field field--wide"><span>Einleitung der Zuteilungsmail</span><textarea name="email_intro" rows="3"><?= Http::e($season['email_intro'] ?? 'Deine Zuteilung für die GSH Fantasy Football Saison steht fest.') ?></textarea></label>
+                <label class="field field--wide"><span>Fair-Play-Wertung</span><select name="fair_play_mode"><?php foreach ($fairPlayModeLabels as $mode => $label): ?><option value="<?= Http::e($mode) ?>" <?= ($season['fair_play_mode'] ?? 'test') === $mode ? 'selected' : '' ?>><?= Http::e($label) ?></option><?php endforeach; ?></select><small>Im Testbetrieb können Vorschläge geprüft und bestätigt werden, sie zählen aber nicht saisonübergreifend.</small></label>
                 <button class="button button--primary" type="submit">Saisondaten speichern</button>
             </form>
         </details>
@@ -432,7 +477,7 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
     </section>
 
     <section class="admin-section">
-        <div class="section-heading"><div><p class="eyebrow">Schritt 3</p><h2>Teilnehmer verteilen</h2><p><?= $allocationCompleted ? 'Die bestehende Verteilung bleibt unverändert. Nur unzugeteilte Nachrücker werden gleichmäßig auf freie Plätze verteilt.' : 'Du kannst einzelne Spieler zuerst per Drag-and-drop fest zuordnen. Die automatische Verteilung behält diese Zuordnungen bei und randomisiert nur den verbleibenden Rest.' ?></p></div><form method="post"<?= $allocationCompleted ? ' data-confirm="Jetzt nur die unzugeteilten Nachrücker auf freie Ligaplätze verteilen?"' : '' ?>><?= Csrf::field() ?><input type="hidden" name="action" value="allocate"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--primary" type="submit"><?= $allocationCompleted ? 'Nachrücker automatisch verteilen' : 'Rest automatisch verteilen' ?></button></form></div>
+        <div class="section-heading"><div><p class="eyebrow">Schritt 3</p><h2>Teilnehmer verteilen</h2><p><?= $allocationCompleted ? 'Die bestehende Verteilung bleibt unverändert. Freie Plätze gehen strikt nach Anmeldezeitpunkt an die frühesten unzugeteilten Nachrücker; lediglich ihre konkrete Liga wird zufällig bestimmt.' : 'Du kannst einzelne Spieler zuerst per Drag-and-drop fest zuordnen. Danach werden die verfügbaren Plätze nach Anmeldezeitpunkt vergeben und nur die konkrete Ligazuteilung der berücksichtigten Teilnehmer randomisiert.' ?></p></div><form method="post"<?= $allocationCompleted ? ' data-confirm="Jetzt freie Ligaplätze nach dem First-Come-First-Serve-Prinzip an die frühesten unzugeteilten Nachrücker vergeben?"' : '' ?>><?= Csrf::field() ?><input type="hidden" name="action" value="allocate"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--primary" type="submit"><?= $allocationCompleted ? 'Nachrücker automatisch verteilen' : 'Rest automatisch verteilen' ?></button></form></div>
 
         <?php if ($sleeperAuditCheckedAt): ?>
         <div class="sleeper-audit-summary <?= ($sleeperMismatchCount || $unknownSleeperMembers) ? 'sleeper-audit-summary--warning' : 'sleeper-audit-summary--ok' ?>">
@@ -518,6 +563,73 @@ $statusLabels = ['open' => 'Reguläre Anmeldung offen', 'closed' => 'Reguläre F
             <form method="post" data-confirm="Sleeper-Beitritte jetzt prüfen und danach nur noch nicht beigetretene Teilnehmer erinnern?"><?= Csrf::field() ?><input type="hidden" name="action" value="send_reminders"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--secondary" type="submit">Nicht Beigetretene erinnern (<?= $reminderCandidateCount ?>)</button></form>
             <form method="post" data-confirm="Jetzt alle offenen Zuteilungsmails versenden?"><?= Csrf::field() ?><input type="hidden" name="action" value="send_mails"><input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>"><button class="button button--primary" type="submit">Freigeben & Mails versenden</button></form>
         </div>
+    </section>
+
+    <section class="admin-section fair-play-section">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Fair Play</p>
+                <h2>Lineup-Strikes</h2>
+                <p>Lineups dürfen automatisiert auf Auffälligkeiten geprüft werden. Das System erstellt ausschließlich Prüfhinweise; Sanktionen werden erst nach manueller Bestätigung durch einen Commissioner verhängt.</p>
+                <p>Erfasst werden ausschließlich Starter, die beim letzten gespeicherten Lineup-Check weiterhin OUT oder IR waren und nach Abschluss der Woche 0 Punkte erzielt haben. Pro Manager und Woche entsteht höchstens ein Vorschlag.</p>
+            </div>
+            <div class="action-buttons">
+                <form method="post">
+                    <?= Csrf::field() ?>
+                    <input type="hidden" name="action" value="run_fair_play">
+                    <input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>">
+                    <button class="button button--primary" type="submit">Lineups jetzt prüfen</button>
+                </form>
+                <form method="post" data-confirm="Bisherige Spieltage rückwirkend prüfen? Sleeper liefert dafür keinen historischen Verletzungsstatus. Null-Punkte-Starter werden deshalb nur als manuelle Prüfhinweise markiert.">
+                    <?= Csrf::field() ?>
+                    <input type="hidden" name="action" value="backfill_fair_play">
+                    <input type="hidden" name="season_id" value="<?= (int) $season['id'] ?>">
+                    <button class="button button--secondary" type="submit">Bisherige Spieltage nachprüfen</button>
+                </form>
+            </div>
+        </div>
+        <div class="fair-play-mode fair-play-mode--<?= Http::e($season['fair_play_mode'] ?? 'test') ?>">
+            <strong><?= Http::e($fairPlayModeLabels[$season['fair_play_mode'] ?? 'test'] ?? $fairPlayModeLabels['test']) ?></strong>
+            <span><?php if (($season['fair_play_mode'] ?? 'test') === 'test'): ?>Diese Saison dient nur zur Erprobung. Auch bestätigte Test-Strikes haben keine Auswirkung auf spätere Teilnahmeentscheidungen.<?php elseif ($season['fair_play_mode'] === 'counted'): ?>Bestätigte Strikes dieser Saison fließen in die saisonübergreifende Historie ein.<?php else: ?>Bestätigte Strikes zählen; auffällige Historien können vor einer künftigen Zulassung manuell geprüft werden. Es erfolgt kein automatischer Ausschluss.<?php endif; ?></span>
+            <?php if (!empty($season['fair_play_snapshot_at'])): ?><small>Letzte Momentaufnahme: <?= Http::e(date('d.m.Y, H:i', strtotime((string) $season['fair_play_snapshot_at']))) ?></small><?php endif; ?>
+        </div>
+
+        <?php if ($fairPlayActiveEvidence): ?>
+        <details class="card fair-play-observations">
+            <summary>Aktuell beobachtete Lineup-Auffälligkeiten (<?= count($fairPlayActiveEvidence) ?>)</summary>
+            <ul>
+                <?php foreach ($fairPlayActiveEvidence as $evidence): ?>
+                <li><strong><?= Http::e($evidence['participant_name']) ?></strong> · <?= Http::e($evidence['player_name']) ?> (<?= Http::e($evidence['injury_status']) ?>) · <?= Http::e($evidence['league_name']) ?> · Woche <?= (int) $evidence['week'] ?></li>
+                <?php endforeach; ?>
+            </ul>
+            <p>Das sind noch keine Strikes. Wird der Spieler rechtzeitig aus dem Starter-Lineup genommen oder nicht mehr als OUT/IR geführt, verschwindet der Hinweis bei einer späteren Momentaufnahme.</p>
+        </details>
+        <?php endif; ?>
+
+        <?php if ($fairPlayStrikes === []): ?>
+            <div class="card fair-play-empty">Noch keine Strike-Vorschläge. Vorschläge erscheinen erst nach Abschluss einer Spielwoche, wenn während der Woche eine passende Momentaufnahme gespeichert wurde.</div>
+        <?php else: ?>
+            <div class="fair-play-list">
+            <?php foreach ($fairPlayStrikes as $strike): ?>
+                <article class="card fair-play-card fair-play-card--<?= Http::e($strike['status']) ?>">
+                    <div class="fair-play-card__heading">
+                        <div><strong><?= Http::e($strike['participant_name']) ?></strong><span>@<?= Http::e($strike['sleeper_username']) ?> · <?= Http::e($strike['league_name']) ?> · Woche <?= (int) $strike['week'] ?></span></div>
+                        <div class="card-tags"><?php if (($strike['origin'] ?? 'live') === 'retrospective'): ?><span class="tag tag--retrospective">Rückwirkend · Status unbekannt</span><?php endif; ?><span class="tag tag--strike-<?= Http::e($strike['status']) ?>"><?= match ($strike['status']) { 'confirmed' => 'Bestätigt', 'dismissed' => 'Verworfen', default => 'Vorschlag' } ?></span></div>
+                    </div>
+                    <ul class="fair-play-evidence">
+                        <?php foreach ($strike['evidence'] as $evidence): ?>
+                        <li><strong><?= Http::e($evidence['player_name'] ?? 'Unbekannter Spieler') ?></strong><?php if (!empty($evidence['injury_status'])): ?> · <?= Http::e($evidence['injury_status']) ?><?php endif; ?> · <?= Http::e(number_format((float) ($evidence['points'] ?? 0), 2, ',', '.')) ?> Punkte <?php if (($evidence['origin'] ?? 'live') === 'retrospective'): ?><small><?= ($evidence['reason'] ?? '') === 'empty_slot' ? 'Rückwirkend erkannter leerer Starter-Slot.' : 'Rückwirkender Null-Punkte-Hinweis; der damalige Verletzungsstatus ist über Sleeper nicht mehr feststellbar.' ?></small><?php else: ?><small>beobachtet am <?= Http::e(date('d.m.Y, H:i', strtotime((string) ($evidence['observed_at'] ?? $strike['created_at'])))) ?></small><?php endif; ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                    <div class="fair-play-actions">
+                        <?php if ($strike['status'] !== 'confirmed'): ?><form method="post" data-confirm="<?= ($strike['origin'] ?? 'live') === 'retrospective' ? 'Für diesen rückwirkenden Hinweis ist der damalige Verletzungsstatus unbekannt. Nur bestätigen, wenn der Verstoß anderweitig geprüft wurde. Wirklich als Strike bestätigen?' : 'Diesen Strike wirklich bestätigen?' ?>"><?= Csrf::field() ?><input type="hidden" name="action" value="review_strike"><input type="hidden" name="strike_id" value="<?= (int) $strike['id'] ?>"><input type="hidden" name="status" value="confirmed"><button class="button button--danger button--compact" type="submit">Strike bestätigen</button></form><?php endif; ?>
+                        <?php if ($strike['status'] !== 'dismissed'): ?><form method="post"><?= Csrf::field() ?><input type="hidden" name="action" value="review_strike"><input type="hidden" name="strike_id" value="<?= (int) $strike['id'] ?>"><input type="hidden" name="status" value="dismissed"><button class="button button--secondary button--compact" type="submit">Verwerfen</button></form><?php endif; ?>
+                        <?php if ($strike['status'] !== 'suggested'): ?><form method="post"><?= Csrf::field() ?><input type="hidden" name="action" value="review_strike"><input type="hidden" name="strike_id" value="<?= (int) $strike['id'] ?>"><input type="hidden" name="status" value="suggested"><button class="button button--secondary button--compact" type="submit">Entscheidung zurücksetzen</button></form><?php endif; ?>
+                    </div>
+                </article>
+            <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
     </section>
 
     <section class="admin-section">

@@ -10,7 +10,7 @@ final class Allocator
 {
     /**
      * @param array<int, array{id:int, capacity:int, admin_participant_id:?int}> $leagues
-     * @param array<int, array{id:int, league_id?:?int}> $participants
+     * @param array<int, array{id:int, league_id?:?int, created_at?:string}> $participants
      * @return array<int, int> participant id => league id
      */
     public function allocate(array $leagues, array $participants, ?int $seed = null): array
@@ -70,6 +70,13 @@ final class Allocator
             $participants,
             static fn (array $participant): bool => !isset($assignments[(int) $participant['id']])
         ));
+        self::sortByRegistration($pool);
+
+        $freePlaces = array_sum(array_map(
+            static fn (int $leagueId): int => max(0, $capacities[$leagueId] - $counts[$leagueId]),
+            array_keys($counts)
+        ));
+        $pool = array_slice($pool, 0, $freePlaces);
 
         if ($seed !== null) {
             mt_srand($seed);
@@ -81,10 +88,6 @@ final class Allocator
                 array_keys($counts),
                 static fn (int $leagueId): bool => $counts[$leagueId] < $capacities[$leagueId]
             );
-            if ($available === []) {
-                throw new RuntimeException('Die eingestellten Liga-Kapazitäten reichen nicht für alle Teilnehmer.');
-            }
-
             usort($available, static function (int $left, int $right) use ($counts): int {
                 return $counts[$left] <=> $counts[$right] ?: $left <=> $right;
             });
@@ -98,7 +101,7 @@ final class Allocator
 
     /**
      * @param array<int, array{id:int, capacity:int, current_count:int}> $leagues
-     * @param array<int, array{id:int}> $participants
+     * @param array<int, array{id:int, created_at?:string}> $participants
      * @return array<int, int> participant id => league id
      */
     public function allocateUnassigned(array $leagues, array $participants, ?int $seed = null): array
@@ -119,6 +122,12 @@ final class Allocator
         }
 
         $pool = array_values($participants);
+        self::sortByRegistration($pool);
+        $freePlaces = array_sum(array_map(
+            static fn (int $leagueId): int => max(0, $capacities[$leagueId] - $counts[$leagueId]),
+            array_keys($counts)
+        ));
+        $pool = array_slice($pool, 0, $freePlaces);
         if ($seed !== null) {
             mt_srand($seed);
         }
@@ -130,10 +139,6 @@ final class Allocator
                 array_keys($counts),
                 static fn (int $leagueId): bool => $counts[$leagueId] < $capacities[$leagueId]
             );
-            if ($available === []) {
-                throw new RuntimeException('In den bestehenden Ligen sind nicht genügend freie Plätze für alle Nachrücker vorhanden.');
-            }
-
             usort($available, static function (int $left, int $right) use ($counts): int {
                 return $counts[$left] <=> $counts[$right] ?: $left <=> $right;
             });
@@ -143,5 +148,21 @@ final class Allocator
         }
 
         return $assignments;
+    }
+
+    /** @param array<int, array{id:int, created_at?:string}> $participants */
+    private static function sortByRegistration(array &$participants): void
+    {
+        usort($participants, static function (array $left, array $right): int {
+            $leftCreatedAt = (string) ($left['created_at'] ?? '');
+            $rightCreatedAt = (string) ($right['created_at'] ?? '');
+            if ($leftCreatedAt !== '' && $rightCreatedAt !== '') {
+                $comparison = strcmp($leftCreatedAt, $rightCreatedAt);
+                if ($comparison !== 0) {
+                    return $comparison;
+                }
+            }
+            return (int) $left['id'] <=> (int) $right['id'];
+        });
     }
 }

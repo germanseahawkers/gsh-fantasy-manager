@@ -55,6 +55,8 @@ final class Database
                 email_subject VARCHAR(255) NOT NULL DEFAULT 'Deine GSH Fantasy-Liga',
                 email_intro TEXT NULL,
                 sleeper_checked_at {$timestamp} NULL,
+                fair_play_mode VARCHAR(20) NOT NULL DEFAULT 'test',
+                fair_play_snapshot_at {$timestamp} NULL,
                 created_at {$timestamp} NOT NULL,
                 updated_at {$timestamp} NOT NULL
             )",
@@ -110,6 +112,47 @@ final class Database
                 checked_at {$timestamp} NOT NULL,
                 UNIQUE (season_id, sleeper_user_id)
             )",
+            "CREATE TABLE IF NOT EXISTS sleeper_player_cache (
+                player_id VARCHAR(40) PRIMARY KEY,
+                full_name VARCHAR(160) NOT NULL,
+                injury_status VARCHAR(40) NULL,
+                player_status VARCHAR(60) NULL,
+                fetched_at {$timestamp} NOT NULL
+            )",
+            "CREATE TABLE IF NOT EXISTS fair_play_lineup_evidence (
+                id {$id},
+                season_id BIGINT NOT NULL,
+                league_id BIGINT NOT NULL,
+                participant_id BIGINT NOT NULL,
+                participant_name VARCHAR(160) NOT NULL,
+                sleeper_user_id VARCHAR(40) NOT NULL,
+                sleeper_username VARCHAR(100) NOT NULL,
+                week INTEGER NOT NULL,
+                roster_id INTEGER NOT NULL,
+                player_id VARCHAR(40) NOT NULL,
+                player_name VARCHAR(160) NOT NULL,
+                injury_status VARCHAR(40) NOT NULL,
+                currently_flagged {$bool} NOT NULL DEFAULT 1,
+                first_seen_at {$timestamp} NOT NULL,
+                last_seen_at {$timestamp} NOT NULL,
+                UNIQUE (league_id, week, roster_id, player_id)
+            )",
+            "CREATE TABLE IF NOT EXISTS fair_play_strikes (
+                id {$id},
+                season_id BIGINT NOT NULL,
+                league_id BIGINT NOT NULL,
+                participant_id BIGINT NOT NULL,
+                participant_name VARCHAR(160) NOT NULL,
+                sleeper_user_id VARCHAR(40) NOT NULL,
+                sleeper_username VARCHAR(100) NOT NULL,
+                week INTEGER NOT NULL,
+                origin VARCHAR(20) NOT NULL DEFAULT 'live',
+                status VARCHAR(20) NOT NULL DEFAULT 'suggested',
+                evidence_json TEXT NOT NULL,
+                created_at {$timestamp} NOT NULL,
+                reviewed_at {$timestamp} NULL,
+                UNIQUE (season_id, participant_id, week)
+            )",
             "CREATE TABLE IF NOT EXISTS login_attempts (
                 id {$id},
                 ip_hash VARCHAR(64) NOT NULL,
@@ -128,6 +171,15 @@ final class Database
         if (!self::columnExists($pdo, 'seasons', 'sleeper_checked_at', $sqlite)) {
             $position = $sqlite ? '' : ' AFTER email_intro';
             $pdo->exec("ALTER TABLE seasons ADD COLUMN sleeper_checked_at {$timestamp} NULL{$position}");
+        }
+        if (!self::columnExists($pdo, 'seasons', 'fair_play_mode', $sqlite)) {
+            $pdo->exec("ALTER TABLE seasons ADD COLUMN fair_play_mode VARCHAR(20) NOT NULL DEFAULT 'test'");
+        }
+        if (!self::columnExists($pdo, 'seasons', 'fair_play_snapshot_at', $sqlite)) {
+            $pdo->exec("ALTER TABLE seasons ADD COLUMN fair_play_snapshot_at {$timestamp} NULL");
+        }
+        if (!self::columnExists($pdo, 'fair_play_strikes', 'origin', $sqlite)) {
+            $pdo->exec("ALTER TABLE fair_play_strikes ADD COLUMN origin VARCHAR(20) NOT NULL DEFAULT 'live'");
         }
 
         $pdo->exec(

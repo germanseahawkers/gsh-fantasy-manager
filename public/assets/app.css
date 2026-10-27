@@ -136,6 +136,30 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--b
 .sleeper-audit-summary--warning { color: #7f1d1d; background: #fff1f1; border-color: #e8aaaa; }
 .sleeper-audit-summary ul { margin: 6px 0 0; padding-left: 20px; }
 .participant-row--mismatch td { background: #fff1f1; }
+.fair-play-mode { display: grid; gap: 4px; margin-bottom: 16px; padding: 14px 16px; color: #6c4210; background: #fff4d6; border: 1px solid #efd28a; border-radius: 10px; }
+.fair-play-mode--counted { color: #07577d; background: #e1f3fc; border-color: #acd8ec; }
+.fair-play-mode--exclusion { color: #7b1111; background: #ffebeb; border-color: #f5bcbc; }
+.fair-play-mode small { margin-top: 3px; opacity: .8; }
+.fair-play-empty { padding: 22px; color: var(--muted); }
+.fair-play-observations { margin-bottom: 16px; padding: 0; }
+.fair-play-observations summary { padding: 16px 18px; color: #6c4210; cursor: pointer; font-weight: 700; }
+.fair-play-observations ul { margin: 0; padding: 0 38px 8px; }
+.fair-play-observations p { margin: 0; padding: 8px 18px 16px; color: var(--muted); font-size: .88rem; }
+.fair-play-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; }
+.fair-play-card { padding: 18px; border-left: 5px solid var(--gold); }
+.fair-play-card--confirmed { border-left-color: var(--red); }
+.fair-play-card--dismissed { border-left-color: #aeb9c3; opacity: .78; }
+.fair-play-card__heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+.fair-play-card__heading strong, .fair-play-card__heading span { display: block; }
+.fair-play-card__heading div > span { color: var(--muted); font-size: .86rem; }
+.fair-play-evidence { margin: 14px 0; padding-left: 20px; }
+.fair-play-evidence li + li { margin-top: 6px; }
+.fair-play-evidence small { display: block; color: var(--muted); }
+.fair-play-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.tag--strike-suggested { color: #6c4210 !important; background: #fae8c9; }
+.tag--strike-confirmed { color: white !important; background: var(--red); }
+.tag--strike-dismissed { color: #4f5f70 !important; background: #e4e9ed; }
+.tag--retrospective { color: #07577d !important; background: #d9f2ff; }
 .muted-action { color: var(--muted); font-size: .82rem; }
 .action-panel { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 26px; }
 .action-buttons { display: flex; gap: 12px; flex-wrap: wrap; }

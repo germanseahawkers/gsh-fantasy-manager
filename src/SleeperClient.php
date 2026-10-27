@@ -6,7 +6,7 @@ namespace GSH\Fantasy;
 
 use RuntimeException;
 
-final class SleeperClient
+class SleeperClient
 {
     private const BASE_URL = 'https://api.sleeper.app/v1';
 
@@ -38,8 +38,20 @@ final class SleeperClient
         return $response;
     }
 
-    /** @return list<string> */
-    public function leagueRosterOwners(string $leagueId): array
+    public function leagueInfo(string $leagueId): array
+    {
+        if (!preg_match('/^[0-9]+$/', $leagueId)) {
+            return [];
+        }
+        return $this->get('/league/' . $leagueId, false);
+    }
+
+    public function nflState(): array
+    {
+        return $this->get('/state/nfl', false);
+    }
+
+    public function leagueRosters(string $leagueId): array
     {
         if (!preg_match('/^[0-9]+$/', $leagueId)) {
             return [];
@@ -49,6 +61,40 @@ final class SleeperClient
         if (!array_is_list($response)) {
             throw new RuntimeException('Sleeper hat eine ungültige Roster-Liste geliefert.');
         }
+        return $response;
+    }
+
+    public function leagueMatchups(string $leagueId, int $week): array
+    {
+        if (!preg_match('/^[0-9]+$/', $leagueId) || $week < 1 || $week > 25) {
+            return [];
+        }
+
+        $response = $this->get('/league/' . $leagueId . '/matchups/' . $week, false);
+        if (!array_is_list($response)) {
+            throw new RuntimeException('Sleeper hat eine ungültige Matchup-Liste geliefert.');
+        }
+        return $response;
+    }
+
+    /** @return array<string, array<string, mixed>> */
+    public function nflPlayers(): array
+    {
+        $response = $this->get('/players/nfl', false, 30);
+        if (array_is_list($response)) {
+            throw new RuntimeException('Sleeper hat eine ungültige Spielerliste geliefert.');
+        }
+        return $response;
+    }
+
+    /** @return list<string> */
+    public function leagueRosterOwners(string $leagueId): array
+    {
+        if (!preg_match('/^[0-9]+$/', $leagueId)) {
+            return [];
+        }
+
+        $response = $this->leagueRosters($leagueId);
 
         $ownerIds = [];
         foreach ($response as $roster) {
@@ -60,12 +106,12 @@ final class SleeperClient
         return array_keys($ownerIds);
     }
 
-    private function get(string $path, bool $notFoundAsEmpty = true): array
+    private function get(string $path, bool $notFoundAsEmpty = true, int $timeout = 8): array
     {
         $curl = curl_init(self::BASE_URL . $path);
         curl_setopt_array($curl, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 8,
+            CURLOPT_TIMEOUT => $timeout,
             CURLOPT_CONNECTTIMEOUT => 4,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_HTTPHEADER => ['Accept: application/json', 'User-Agent: GSH-Fantasy-Manager/1.0'],

@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 use GSH\Fantasy\Allocator;
 use GSH\Fantasy\Database;
+use GSH\Fantasy\FairPlayService;
 use GSH\Fantasy\SleeperClient;
 
 require dirname(__DIR__) . '/src/bootstrap.php';
@@ -22,7 +23,7 @@ $closed = $pdo->query("SELECT * FROM seasons WHERE status='closed'")->fetchAll()
 foreach ($closed as $season) {
     $leaguesStatement = $pdo->prepare('SELECT id, capacity, admin_participant_id FROM leagues WHERE season_id=? ORDER BY sort_order, id');
     $leaguesStatement->execute([$season['id']]);
-    $participantsStatement = $pdo->prepare('SELECT id, league_id FROM participants WHERE season_id=?');
+    $participantsStatement = $pdo->prepare('SELECT id, league_id, created_at FROM participants WHERE season_id=? ORDER BY created_at, id');
     $participantsStatement->execute([$season['id']]);
     $leagues = $leaguesStatement->fetchAll();
     $participants = $participantsStatement->fetchAll();
@@ -64,5 +65,14 @@ foreach ($approved as $season) {
         } catch (Throwable $exception) {
             fwrite(STDERR, "Sleeper-Liga {$league['id']}: {$exception->getMessage()}\n");
         }
+    }
+
+    try {
+        $fairPlay = (new FairPlayService($pdo))->run((int) $season['id']);
+        if ($fairPlay['snapshotted']) {
+            fwrite(STDOUT, "Saison {$season['id']}: Fair-Play-Momentaufnahme für Woche {$fairPlay['week']} gespeichert, {$fairPlay['flagged']} auffällige Starter.\n");
+        }
+    } catch (Throwable $exception) {
+        fwrite(STDERR, "Saison {$season['id']} Fair Play: {$exception->getMessage()}\n");
     }
 }

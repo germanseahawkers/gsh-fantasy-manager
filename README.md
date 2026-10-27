@@ -15,6 +15,7 @@ Eigenständige WebApp für Anmeldung, automatische Liga-Zuteilung, Drag-and-drop
 - Drag-and-drop-Korrekturen vor der Freigabe
 - Zuteilungsmails mit Versandprotokoll
 - Abgleich des Beitrittsstatus über die offizielle Sleeper-API
+- Fair-Play-Momentaufnahmen und manuell bestätigte Lineup-Strikes
 
 ## Voraussetzungen
 
@@ -81,6 +82,8 @@ Zuerst wird eine Saison angelegt, danach die gewünschte Anzahl an Ligen. Jede L
 
 Teilnehmer, die im Formular ihre Admin-Bereitschaft erklären, werden im Backend hervorgehoben. Für jede Liga wird anschließend genau ein tatsächlicher Liga-Admin ausgewählt. Derselbe Teilnehmer kann technisch nicht Admin zweier Ligen sein und bleibt bei der automatischen Verteilung in seiner Liga. Vor der ersten Randomisierung können außerdem beliebige Spieler per Drag-and-drop fest einer Liga zugeordnet werden; die automatische Verteilung behält diese Zuordnungen bei und verteilt nur die noch offenen Teilnehmer.
 
+Reichen die verfügbaren Ligaplätze nicht für alle offenen Anmeldungen, entscheidet strikt der gespeicherte Anmeldezeitpunkt. Nur die frühesten Anmeldungen werden berücksichtigt; ihre konkrete Verteilung auf die noch freien Ligen bleibt zufällig. Nicht berücksichtigte Personen verbleiben in chronologischer Reihenfolge auf der Warteliste. Das gilt ebenso für spätere automatische Nachrückerverteilungen.
+
 Im ausklappbaren Teilnehmerverzeichnis kann ein fehlerhaft angegebener Sleeper-Name nachträglich korrigiert werden. Die App validiert den neuen Namen direkt bei Sleeper, übernimmt dessen feste User-ID und verhindert, dass derselbe Sleeper-Account zwei Teilnehmern zugeordnet wird. Anschließend sollte der Sleeper-Wiederherstellungs-Dry-Run erneut ausgeführt werden.
 
 Nach dem regulären Anmeldeschluss setzt der Cronjob den internen Saisonstatus auf geschlossen und erzeugt automatisch einen gleichmäßigen Zuteilungsentwurf. Das öffentliche Formular bleibt anschließend als Nachrückverfahren erreichbar. Nach bereits erfolgter Zuteilung eingehende Anmeldungen erhalten keine automatische Platzzusage und erscheinen zunächst als nicht zugeteilt, damit sie gezielt auf freie Plätze oder als Ersatz verschoben werden können. Erst der Button **Freigeben & Mails versenden** verschickt die Einladungen. So bleibt Zeit für Drag-and-drop-Korrekturen.
@@ -126,6 +129,24 @@ php bin/reconcile-sleeper-leagues.php --season=latest --apply
 ```
 
 Teilnehmer, die in keiner oder in mehreren eingerichteten Sleeper-Ligen gefunden werden, verändert das Werkzeug grundsätzlich nicht.
+
+## Fair Play und Lineup-Strikes
+
+Der bestehende Cronjob speichert während einer freigegebenen Saison im Abstand von höchstens 30 Minuten Momentaufnahmen der Sleeper-Lineups. Die große NFL-Spielerliste wird entsprechend der Sleeper-Empfehlung höchstens einmal täglich aktualisiert. Erkennt die App bei einem Starter den Verletzungsstatus `OUT` oder `IR`, bleibt dieser Beleg nur so lange aktiv, wie der Spieler bei späteren Prüfungen weiterhin entsprechend gemeldet und aufgestellt ist.
+
+Lineups dürfen automatisiert auf Auffälligkeiten geprüft werden. Das System erstellt ausschließlich Prüfhinweise; Sanktionen werden erst nach manueller Bestätigung durch einen Commissioner verhängt.
+
+Nach Abschluss der Spielwoche vergleicht die App die zuletzt aktive Auffälligkeit mit dem finalen Starter-Lineup und den Einzelpunkten. Nur wenn der Spieler weiterhin Starter war und exakt null Punkte erzielt hat, entsteht ein Strike-Vorschlag. Mehrere auffällige Starter desselben Managers ergeben in einer Spielwoche gemeinsam höchstens einen Vorschlag. Im Adminbereich muss jeder Vorschlag ausdrücklich bestätigt oder verworfen werden.
+
+Die Wertung wird pro Saison unter **Saisondaten und Mailtext** eingestellt:
+
+- **Testbetrieb:** Vorschläge und Entscheidungen werden gespeichert, zählen aber nicht für spätere Teilnahmeentscheidungen.
+- **Strikes zählen:** Bestätigte Strikes gehören zur Wertung der Saison.
+- **Ausschlussprüfung:** Strikes zählen und können als Grundlage für eine manuelle Zulassungsentscheidung dienen. Die App schließt niemanden automatisch aus.
+
+Nach dem Deployment der Funktion muss einmal `php bin/migrate.php` ausgeführt werden. Ohne regelmäßig laufenden Cronjob kann die App rückwirkend nicht zuverlässig belegen, welcher Verletzungsstatus vor beziehungsweise während des Spieltags sichtbar war. Der Button **Lineups jetzt prüfen** erstellt zusätzlich jederzeit eine manuelle Momentaufnahme.
+
+Der Button **Bisherige Spieltage nachprüfen** durchsucht bereits abgeschlossene Wochen nach leeren Starter-Slots und Startern mit exakt null Punkten. Da die öffentliche Sleeper-API keinen historischen Verletzungsstatus bereitstellt, sind diese Ergebnisse ausdrücklich als rückwirkende Hinweise mit unbekanntem Status markiert. Sie werden niemals automatisch bestätigt und müssen von einem Commissioner anhand weiterer Informationen bewertet werden. Eine wiederholte Rückprüfung erzeugt keine doppelten Hinweise.
 
 ## Mitwirken
 
